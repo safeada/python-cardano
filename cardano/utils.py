@@ -11,8 +11,7 @@ from tlslite.utils.chacha20_poly1305 import CHACHA20_POLY1305
 from . import cbits
 
 FIRST_HARDEN_INDEX = 2147483648
-PASSPHASE = b'123456'
-def generate_pk(seed ):
+def generate_pk(seed, passphase):
     for i in range(1, 1000):
         I = hmac.new(seed, b'Root Seed Chain %d' % i, hashlib.sha512).digest()
         Il, Ir = I[:32], I[32:]
@@ -23,7 +22,7 @@ def generate_pk(seed ):
         ext[31] |= 64
         if ext[31] & 0x20 != 0:
             continue
-        return cbits.encrypted_from_secret(PASSPHASE, Il, Ir)
+        return cbits.encrypted_from_secret(passphase, Il, Ir)
     else:
         print('generate failed')
 
@@ -72,23 +71,23 @@ def encode_addr(addr):
         addr[0]
     ]))
 
-def derive_address(xpriv, account_index, address_index):
+def derive_address(xpriv, passphase, account_index, address_index):
     account_xpriv = cbits.encrypted_derive_private(
-        xpriv, PASSPHASE, account_index, cbits.DERIVATION_V1
+        xpriv, passphase, account_index, cbits.DERIVATION_V1
     )
     hdpass = derive_hdpassphase(xpriv_to_xpub(xpriv))
     key = cbits.encrypted_derive_private(
-        account_xpriv, PASSPHASE, address_index, cbits.DERIVATION_V1
+        account_xpriv, passphase, address_index, cbits.DERIVATION_V1
     )
     return encode_addr(hd_addr(xpriv_to_xpub(key), [account_index, address_index], hdpass))
 
-def test(words):
+def test(words, passphase):
     entropy = Mnemonic('english').to_entropy(words)
     sseed = cbor.dumps(hashlib.blake2b(cbor.dumps(bytes(entropy)), digest_size=32).digest())
-    root_xpriv = generate_pk(sseed) # pk + chain code
+    root_xpriv = generate_pk(sseed, passphase) # pk + chain code
     hdpass = derive_hdpassphase(xpriv_to_xpub(root_xpriv))
     print('wallet id', encode_addr(root_addr(xpriv_to_xpub(root_xpriv))).decode())
-    print('first address', derive_address(root_xpriv, FIRST_HARDEN_INDEX, FIRST_HARDEN_INDEX).decode())
+    print('first address', derive_address(root_xpriv, passphase, FIRST_HARDEN_INDEX, FIRST_HARDEN_INDEX).decode())
 
 if __name__ == '__main__':
-    test('ring crime symptom enough erupt lady behave ramp apart settle citizen junk')
+    test('ring crime symptom enough erupt lady behave ramp apart settle citizen junk', b'123456')
