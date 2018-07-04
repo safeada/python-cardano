@@ -1,6 +1,7 @@
 import binascii
 import hashlib  # Python >= 3.6
 import hmac
+import struct
 
 from mnemonic import Mnemonic
 import cbor
@@ -64,12 +65,30 @@ def encode_with_crc(v):
         binascii.crc32(s)
     ])
 
+def addr_hash2(addr):
+    return hashlib.blake2b(hashlib.sha3_256(cbor.dumps(addr)).digest(), digest_size=20).digest()
+
+def encode_with_crc2(v):
+    s = cbor.dumps(v)
+    return b'\x00' + s + struct.pack('<I', binascii.crc32(s))
+
 def encode_addr(addr):
-    return base58.b58encode(encode_with_crc([
-        addr_hash(addr),
+    h = addr_hash(addr)
+    bs = encode_with_crc([
+        h,
         addr[2],
         addr[0]
-    ]))
+    ])
+    return base58.b58encode(bs)
+
+def encode_addr2(addr):
+    h = addr_hash2(addr)
+    bs = encode_with_crc2([
+        h,
+        addr[2],
+        addr[0]
+    ])
+    return base58.b58encode(bs)
 
 def derive_address(xpriv, passphase, account_index, address_index):
     account_xpriv = cbits.encrypted_derive_private(
@@ -79,7 +98,7 @@ def derive_address(xpriv, passphase, account_index, address_index):
     key = cbits.encrypted_derive_private(
         account_xpriv, passphase, address_index, cbits.DERIVATION_V1
     )
-    return encode_addr(hd_addr(xpriv_to_xpub(key), [account_index, address_index], hdpass))
+    return hd_addr(xpriv_to_xpub(key), [account_index, address_index], hdpass)
 
 def test(words, passphase):
     entropy = Mnemonic('english').to_entropy(words)
@@ -87,7 +106,8 @@ def test(words, passphase):
     root_xpriv = generate_pk(sseed, passphase) # pk + chain code
     hdpass = derive_hdpassphase(xpriv_to_xpub(root_xpriv))
     print('wallet id', encode_addr(root_addr(xpriv_to_xpub(root_xpriv))).decode())
-    print('first address', derive_address(root_xpriv, passphase, FIRST_HARDEN_INDEX, FIRST_HARDEN_INDEX).decode())
+    print('experimental wallet id', encode_addr2(root_addr(xpriv_to_xpub(root_xpriv))).decode())
+    print('first address', encode_addr(derive_address(root_xpriv, passphase, FIRST_HARDEN_INDEX, FIRST_HARDEN_INDEX)).decode())
 
 if __name__ == '__main__':
     test('ring crime symptom enough erupt lady behave ramp apart settle citizen junk', b'123456')
