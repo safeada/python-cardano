@@ -70,6 +70,7 @@ def addr_hash2(addr):
 
 def encode_with_crc2(v):
     s = cbor.dumps(v)
+    # the prefix byte is for backward compatibility, old address always start with 0x82.
     return b'\x00' + s + struct.pack('<I', binascii.crc32(s))
 
 def encode_addr(addr):
@@ -82,6 +83,7 @@ def encode_addr(addr):
     return base58.b58encode(bs)
 
 def encode_addr2(addr):
+    addr[2] = {}    # don't need any attributes in bootstrap era.
     h = addr_hash2(addr)
     bs = encode_with_crc2([
         h,
@@ -108,6 +110,7 @@ def test(words, passphase):
     print('wallet id', encode_addr(root_addr(xpriv_to_xpub(root_xpriv))).decode())
     print('experimental wallet id', encode_addr2(root_addr(xpriv_to_xpub(root_xpriv))).decode())
     print('first address', encode_addr(derive_address(root_xpriv, passphase, FIRST_HARDEN_INDEX, FIRST_HARDEN_INDEX)).decode())
+    print('experimental first address', encode_addr2(derive_address(root_xpriv, passphase, FIRST_HARDEN_INDEX, FIRST_HARDEN_INDEX)).decode())
 
 if __name__ == '__main__':
     test('ring crime symptom enough erupt lady behave ramp apart settle citizen junk', b'123456')
