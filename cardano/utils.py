@@ -92,6 +92,19 @@ def encode_addr2(addr):
     ])
     return base58.b58encode(bs)
 
+def decode_addr(s):
+    s = base58.b58decode(s)
+    if s[0] == 0:
+        # version byte for new encoding.
+        crc32, = struct.unpack('<I', s[-4:])
+        s = s[1:-4]
+    else:
+        # old normal address.
+        tag, crc32 = cbor.loads(s)
+        s = tag.value
+    assert binascii.crc32(s) == crc32, 'crc32 checksum don\'t match.'
+    return cbor.loads(s)
+
 def derive_address(xpriv, passphase, account_index, address_index):
     account_xpriv = cbits.encrypted_derive_private(
         xpriv, passphase, account_index, cbits.DERIVATION_V1
@@ -111,6 +124,9 @@ def test(words, passphase):
     print('experimental wallet id', encode_addr2(root_addr(xpriv_to_xpub(root_xpriv))).decode())
     print('first address', encode_addr(derive_address(root_xpriv, passphase, FIRST_HARDEN_INDEX, FIRST_HARDEN_INDEX)).decode())
     print('experimental first address', encode_addr2(derive_address(root_xpriv, passphase, FIRST_HARDEN_INDEX, FIRST_HARDEN_INDEX)).decode())
+    print('decode',
+    decode_addr('DdzFFzCqrhsx32JQQd7rKh85WTW8DqEghedsHB9Jv5Z86xKiuFFq9qcHWSyjo9bJwZgaHQoEbzdV1jSHPb1J6EQPHPx933dwHkv6aazr'),
+    decode_addr('12MLxfn92bNZvqMcKo3iG7LQ1X1WqooMgadk6cor'))
 
 if __name__ == '__main__':
     test('ring crime symptom enough erupt lady behave ramp apart settle citizen junk', b'123456')
