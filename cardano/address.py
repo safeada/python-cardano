@@ -36,7 +36,7 @@ def xpriv_to_xpub(xpriv):
 def pack_addr_payload(hdpass, path):
     'packHDAddressAttr'
     # manually construct variable length list encoding.
-    plaintext = b''.join([b'\x9f'] + [cbor.dumps(i) for i in path] + [b'\xff'])
+    plaintext = cbor.dumps(cbor.VarList(path))
     return bytes(CHACHA20_POLY1305(hdpass, 'python').seal(b"serokellfore", plaintext, b''))
 
 def root_addr(xpub):

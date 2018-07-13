@@ -4,6 +4,7 @@ Support bidirectional conversation on unidirectional lightweight connections.
 import sys
 import random
 import struct
+import binascii
 
 import cbor
 import gevent
@@ -147,11 +148,7 @@ class Node(object):
 def get_tip(conv):
     # send get_tip message
     conv.send(b'\x04')
-    conv.send(
-        b'\x82' +               # [
-        b'\x9f\xff' +           # [] variable length.
-        b'\x80'                 # []
-    )
+    conv.send(cbor.dumps([cbor.VarList(), []]))
     return cbor.loads(conv.receive())
 
 if __name__ == '__main__':
