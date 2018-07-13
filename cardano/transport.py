@@ -128,7 +128,7 @@ class RemoteEndPoint(object):
             return n
 
         def do_probing(self):
-            self.socket.sendall(pack_u32(int(ControlHeader.ProbeSocket)))
+            self.socket.sendall(pack_u32(ControlHeader.ProbeSocket))
             gevent.sleep(10)
             # close socket
             self.socket.close()
@@ -196,7 +196,7 @@ class LocalEndPoint(object):
             self._remotes = {} # addr -> RemoteEndPoint, incoming unaddressable connection use random addr.
             self._next_remote_id = HEAVY_ID_MIN
 
-            self._queue = gevent.queue.Queue(maxsize=1024)
+            self._queue = gevent.queue.Queue(maxsize=128)
 
         @property
         def queue(self):
@@ -309,7 +309,7 @@ class LocalEndPoint(object):
                 elif cmd == ControlHeader.CloseEndPoint:
                     q.put(Event.EndpointClosed())
                 elif cmd == ControlHeader.ProbeSocket:
-                    sock.sendall(pack_u32(int(ControlHeader.ProbeSocketAck)))
+                    sock.sendall(pack_u32(ControlHeader.ProbeSocketAck))
                 elif cmd == ControlHeader.ProbeSocketAck:
                     remote.stop_probing()
             else:
