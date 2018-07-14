@@ -5,6 +5,8 @@ import sys
 import random
 import struct
 import binascii
+import enum
+import hashlib
 
 import cbor
 import gevent
@@ -12,13 +14,29 @@ import gevent.event
 
 from .transport import Transport, ControlHeader, Event
 
+PROTOCOL_MAGIC = 764824073
+
+def default_hash(v):
+    return hashlib.blake2b(cbor.dumps(v), digest_size=32).digest()
+
+class Message(enum.IntEnum):
+    Void = 0
+    GetHeaders = 4
+    Headers = 5
+    GetBlocks = 6
+    Block = 7
+    Subscribe1 = 13
+    Subscribe = 14
+    Stream = 15
+    StreamBlock = 16
+
 DEFAULT_PEER_DATA = [
-    764824073, # protocol magic.
+    PROTOCOL_MAGIC, # protocol magic.
     [0,1,0],   # version
-    {
-        0x04:  [0, cbor.Tag(24, cbor.dumps(0x05))],
-        0x05:  [0, cbor.Tag(24, cbor.dumps(0x04))],
-        0x06:  [0, cbor.Tag(24, cbor.dumps(0x07))],
+    { # in handlers
+        Message.GetHeaders:     [0, cbor.Tag(24, cbor.dumps(Message.Headers))],
+        Message.Headers:        [0, cbor.Tag(24, cbor.dumps(Message.GetHeaders))],
+        Message.GetBlocks:      [0, cbor.Tag(24, cbor.dumps(Message.Block))],
         0x22:  [0, cbor.Tag(24, cbor.dumps(0x5e))],
         0x25:  [0, cbor.Tag(24, cbor.dumps(0x5e))],
         0x2b:  [0, cbor.Tag(24, cbor.dumps(0x5d))],
@@ -36,10 +54,10 @@ DEFAULT_PEER_DATA = [
         0x61:  [0, cbor.Tag(24, cbor.dumps(0x3d))],
         0x62:  [0, cbor.Tag(24, cbor.dumps(0x37))],
     },
-    {
-        0x04:  [0, cbor.Tag(24, cbor.dumps(0x05))],
-        0x05:  [0, cbor.Tag(24, cbor.dumps(0x04))],
-        0x06:  [0, cbor.Tag(24, cbor.dumps(0x07))],
+    { # out handlers
+        Message.GetHeaders:     [0, cbor.Tag(24, cbor.dumps(Message.Headers))],
+        Message.Headers:        [0, cbor.Tag(24, cbor.dumps(Message.GetHeaders))],
+        Message.GetBlocks:      [0, cbor.Tag(24, cbor.dumps(Message.Block))],
         0x0d:  [0, cbor.Tag(24, cbor.dumps(0x00))],
         0x0e:  [0, cbor.Tag(24, cbor.dumps(0x00))],
         0x25:  [0, cbor.Tag(24, cbor.dumps(0x5e))],
@@ -53,8 +71,6 @@ DEFAULT_PEER_DATA = [
     },
 ]
 
-MAX_INT32 = 2**31
-
 class Conversation(object):
     'Bidirectional connection.'
     def __init__(self, id, conn):
@@ -62,6 +78,9 @@ class Conversation(object):
         self._conn = conn # client unidirectional lightweight connection.
         self._queue = gevent.queue.Queue(maxsize=128)
         self._evt_handshake = gevent.event.Event()
+
+    def __gc__(self):
+        self.close()
 
     @property
     def id(self):
@@ -71,10 +90,25 @@ class Conversation(object):
         self._conn.send(data)
 
     def receive(self, *args):
-        return self._queue.get(*args)
+        o = self._queue.get(*args)
+        if o != StopIteration:
+            return o
+
+        # closed.
+        self._queue = None
+
+    def closed(self):
+        return self._conn.alive
 
     def close(self):
-        pass
+        'close by us.'
+        self._conn.close()
+
+    def on_close(self):
+        'close by remote.'
+        if self._conn.alive:
+            self._conn.close()
+        self._queue.put(StopIteration)
 
 class Node(object):
     def __init__(self, ep):
@@ -135,24 +169,115 @@ class Node(object):
                     self._peer_received[addr] = cbor.loads(ev.data)
                     continue
                 if nonce == None:
-                    assert ev.data[:1] == b'A', 'dont support server function.'
+                    assert ev.data[:1] == b'A', 'dont support listeners yet.'
                     nonce = struct.unpack('>Q', ev.data[1:])[0]
                     self._server_conns[ev.connid] = (nonce, addr)
                     self._conversations[(nonce, addr)]._evt_handshake.set()
                 else:
                     # normal data.
                     self._conversations[(nonce, addr)]._queue.put(ev.data)
+            elif tp == Event.ConnectionClosed:
+                nonce, addr = self._server_conns.pop(ev.connid)
+                conv = self._conversations.pop((nonce, addr))
+                conv.on_close()
             else:
                 print('unhandled event', ev)
 
-def get_tip(conv):
-    # send get_tip message
-    conv.send(b'\x04')
-    conv.send(cbor.dumps([cbor.VarList(), []]))
-    return cbor.loads(conv.receive())
+class Worker(object):
+    def __init__(self, node, addr):
+        conv = node.connect(addr)
+        self.conv = conv
+        conv.send(cbor.dumps(self.message_type))
+
+    def close(self):
+        self.conv.close()
+
+class DecodedBlockHeader(object):
+    def __init__(self, data):
+        self.data = data
+
+    def hash(self):
+        return default_hash(self.data)
+
+    def prev_header(self):
+        return self.data[1][1]
+
+    def slot(self):
+        if self.is_genesis():
+            epoch = self.data[1][3][0]
+            slotid = None
+        else:
+            epoch, slotid = self.data[1][3][0]
+        return epoch, slotid
+
+    def is_genesis(self):
+        return self.data[0] == 0
+
+class DecodedBlock(object):
+    def __init__(self, data):
+        self.data = data
+
+    def header(self):
+        return DecodedBlockHeader([self.data[0], self.data[1][0]])
+
+    def is_genesis(self):
+        return self.data[0] == 0
+
+    def transactions(self):
+        if self.is_genesis():
+            return []
+        else:
+            return self.data[1][1][0] # GenericBlock -> MainBody -> [(Tx, TxWitness)]
+
+class GetHeaders(Worker):
+    message_type = Message.GetHeaders
+
+    def __call__(self, from_, to):
+        self.conv.send(cbor.dumps([cbor.VarList(from_), [to] if to else []]))
+        tag, data = cbor.loads(self.conv.receive()) # sum type MsgHeaders
+        assert tag == 0, 'no headers'
+        return map(DecodedBlockHeader, data)
+
+class GetBlocks(Worker):
+    message_type = Message.GetBlocks
+
+    def __call__(self, from_, to):
+        self.conv.send(cbor.dumps([from_, to]))
+        result = []
+        while True:
+            buf = self.conv.receive()
+            if not buf:
+                # closed by remote.
+                break
+            tag, data = cbor.loads(buf)
+            if tag == 0: # MsgBlock
+                result.append(DecodedBlock(data))
+        return result
 
 if __name__ == '__main__':
     node = Node(Transport().endpoint())
-    print('connect')
-    conv = node.connect('relays.cardano-mainnet.iohk.io:3000:0')
-    print('get tip', get_tip(conv))
+    addr = 'relays.cardano-mainnet.iohk.io:3000:0'
+
+    headers_worker = GetHeaders(node, addr)
+    current = None
+    while True:
+        # get tip
+        tip = next(headers_worker([], None))
+        h = tip.hash()
+        if h != current:
+            for b in GetBlocks(node, addr)(current or h, h):
+                hdr = b.header()
+                h = hdr.hash()
+                if h == current:
+                    continue
+                print('new block', hdr.slot())
+                txs = b.transactions()
+                if txs:
+                    print('transactions:')
+                    for tx, _ in txs:
+                        print(binascii.hexlify(default_hash(tx)).decode())
+                else:
+                    print('no transactions')
+            current = h
+
+        gevent.sleep(20)
