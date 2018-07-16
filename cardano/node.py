@@ -254,9 +254,8 @@ class GetBlocks(Worker):
                 result.append(DecodedBlock(data))
         return result
 
-if __name__ == '__main__':
+def poll_tip(addr):
     node = Node(Transport().endpoint())
-    addr = 'relays.cardano-mainnet.iohk.io:3000:0'
 
     headers_worker = GetHeaders(node, addr)
     current = None
@@ -281,3 +280,27 @@ if __name__ == '__main__':
             current = h
 
         gevent.sleep(20)
+
+def get_all_headers(addr, genesis):
+    node = Node(Transport().endpoint())
+
+    headers_worker = GetHeaders(node, addr)
+    tip = next(headers_worker([], None))
+
+    print('tip', binascii.hexlify(tip.hash()), binascii.hexlify(tip.prev_header()))
+    headers = headers_worker([genesis], tip.hash())
+    print('validate headers')
+    current = None
+    for hdr in headers:
+        print(binascii.hexlify(hdr.hash()), binascii.hexlify(hdr.prev_header()))
+        if current:
+            assert hdr.hash() == current, 'invalid chain'
+            current = hdr.prev_header()
+    assert current == genesis
+
+if __name__ == '__main__':
+    addr = 'relays.cardano-mainnet.iohk.io:3000:0'
+    poll_tip(addr)
+
+    #genesis = binascii.unhexlify(b'89d9b5a5b8ddc8d7e5a6795e9774d97faf1efea59b2caf7eaf9f8c5b32059df4'),
+    #get_all_headers(addr, genesis)
