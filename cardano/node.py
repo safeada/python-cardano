@@ -193,8 +193,9 @@ class Worker(object):
         self.conv.close()
 
 class DecodedBlockHeader(object):
-    def __init__(self, data):
+    def __init__(self, data, raw=None):
         self.data = data
+        self._raw = raw
 
     def hash(self):
         return default_hash(self.data)
@@ -213,9 +214,13 @@ class DecodedBlockHeader(object):
     def is_genesis(self):
         return self.data[0] == 0
 
+    def raw(self):
+        return self._raw or cbor.dumps(self.data)
+
 class DecodedBlock(object):
-    def __init__(self, data):
+    def __init__(self, data, raw=None):
         self.data = data
+        self._raw = raw
 
     def header(self):
         return DecodedBlockHeader([self.data[0], self.data[1][0]])
@@ -228,6 +233,9 @@ class DecodedBlock(object):
             return []
         else:
             return self.data[1][1][0] # GenericBlock -> MainBody -> [(Tx, TxWitness)]
+
+    def raw(self):
+        return self._raw or cbor.dumps(self.data)
 
 class GetHeaders(Worker):
     message_type = Message.GetHeaders

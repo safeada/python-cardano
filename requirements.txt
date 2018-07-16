@@ -6,4 +6,5 @@ mnemonic==0.18
 pbkdf2==1.3
 recordclass==0.5
 tlslite-ng==0.7.4
--e git+https://github.com/yihuang/cbor_py.git#egg=cbor-1.0.0
+-e git+https://github.com/yihuang/cbor_py.git@c7a19f0b453df2bf25d82b4c0acb62fd5692f0a9#egg=cbor
+python-rocksdb==0.6.9
