@@ -4,9 +4,7 @@ from .storage import Storage
 from .transport import Transport
 from .node import Node, GetHeaders, GetBlocks
 
-def sync(addr, genesis, dbpath):
-    store = Storage(dbpath)
-    node = Node(Transport().endpoint())
+def sync(store, node, addr, genesis):
     headers_worker = GetHeaders(node, addr)
 
     current_epoch = 0
@@ -42,5 +40,12 @@ def sync(addr, genesis, dbpath):
         print('finish', blk.header().slot())
 
 if __name__ == '__main__':
+    store = Storage('./test_db')
+    node = Node(Transport().endpoint())
     genesis = binascii.unhexlify(b'89d9b5a5b8ddc8d7e5a6795e9774d97faf1efea59b2caf7eaf9f8c5b32059df4')
-    sync('relays.cardano-mainnet.iohk.io:3000:0', genesis, './test_db')
+    try:
+        sync(store, node, 'relays.cardano-mainnet.iohk.io:3000:0', genesis)
+    finally:
+        store = None
+        import gc
+        gc.collect()
