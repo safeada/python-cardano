@@ -4,18 +4,29 @@ from .storage import Storage
 from .transport import Transport
 from .node import Node, GetHeaders, GetBlocks
 
-def sync(store, node, addr, genesis):
+def sync(store, node, addr, genesis, genesis_prev):
     headers_worker = GetHeaders(node, addr)
 
     current_epoch = 0
     current_epoch_db = None
 
     print('get tip')
-    hdr = next(headers_worker([], None))
+    hdr = headers_worker([], None)[0]
     network_tip = hdr.hash()
 
     while True:
-        local_tip = store.tip() or genesis
+        local_tip = store.tip()
+        if not local_tip:
+            # get genesis block.
+            blk = GetBlocks(node, addr)(genesis, genesis)[0]
+            assert blk.header().prev_header() == genesis_prev and blk.header().slot() == (0, None), 'invalid genesis block.'
+            assert current_epoch_db == None, 'impossible'
+            current_epoch_db = store.open_epoch_db(0)
+            current_epoch_db.put(b'genesis', blk.header().hash())
+            current_epoch_db.put(blk.header().hash(), blk.raw())
+            current_epoch_db.put(b'tip', blk.header().hash())
+            store.append_block(blk)
+            continue
 
         print('get headers')
         hdrs = list(headers_worker([local_tip], network_tip))
@@ -32,6 +43,7 @@ def sync(store, node, addr, genesis):
                 current_epoch = epoch
                 current_epoch_db = store.open_epoch_db(epoch)
             current_epoch_db.put(hash, blk.raw())
+            current_epoch_db.put(b'tip', hash) # update tip
             if slotid == None:
                 # is genesis
                 print('set genesis', current_epoch)
@@ -43,8 +55,9 @@ if __name__ == '__main__':
     store = Storage('./test_db')
     node = Node(Transport().endpoint())
     genesis = binascii.unhexlify(b'89d9b5a5b8ddc8d7e5a6795e9774d97faf1efea59b2caf7eaf9f8c5b32059df4')
+    genesis_prev = binascii.unhexlify(b'5f20df933584822601f9e3f8c024eb5eb252fe8cefb24d1317dc3d432e940ebb')
     try:
-        sync(store, node, 'relays.cardano-mainnet.iohk.io:3000:0', genesis)
+        sync(store, node, 'relays.cardano-mainnet.iohk.io:3000:0', genesis, genesis_prev)
     finally:
         store = None
         import gc

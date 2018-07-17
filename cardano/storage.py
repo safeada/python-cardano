@@ -1,7 +1,9 @@
 '''
 * Use rocksdb as cardano-sl did.
 * Store each epoch in seperate db.
-    hash -> raw block
+    hash -> block data
+    genesis -> hash of genesis block of epoch.
+    tip -> hash of last block of epoch.
 * Main database:
   * 'b' + hash -> BlockHeader
   * 'c' + tip -> hash
@@ -18,10 +20,12 @@ import os
 import rocksdb
 import cbor
 
+from .block import DecodedBlock, DecodedBlockHeader
+
 class Storage(object):
-    def __init__(self, root_path):
+    def __init__(self, root_path, readonly=False):
         self._root_path = root_path
-        self.db = rocksdb.DB(os.path.join(self._root_path, 'db'), rocksdb.Options(create_if_missing=True))
+        self.db = rocksdb.DB(os.path.join(self._root_path, 'db'), rocksdb.Options(create_if_missing=True), readonly)
 
     def epoch_db_path(self, epoch):
         return os.path.join(self._root_path, 'epoch%d'%epoch)
@@ -36,7 +40,15 @@ class Storage(object):
         return self.db.put(b'c/tip', s)
 
     def blockheader(self, hash):
-        return cbor.loads(self.db.get(b'b/'+hash))
+        buf = self.db.get(b'b/'+hash)
+        if buf:
+            return DecodedBlockHeader(cbor.loads(buf), buf)
+
+    def block(self, hdr):
+        db = self.open_epoch_db(hdr.slot()[0], True)
+        buf = db.get(hdr.hash())
+        if buf:
+            return DecodedBlock(cbor.loads(buf), buf)
 
     #def block(self, hash):
     #    hdr = self.blockheader(hash)

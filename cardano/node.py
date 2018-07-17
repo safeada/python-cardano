@@ -6,18 +6,15 @@ import random
 import struct
 import binascii
 import enum
-import hashlib
 
 import cbor
 import gevent
 import gevent.event
 
 from .transport import Transport, ControlHeader, Event
+from .block import DecodedBlockHeader, DecodedBlock
 
 PROTOCOL_MAGIC = 764824073
-
-def default_hash(v):
-    return hashlib.blake2b(cbor.dumps(v), digest_size=32).digest()
 
 class Message(enum.IntEnum):
     Void = 0
@@ -192,51 +189,6 @@ class Worker(object):
     def close(self):
         self.conv.close()
 
-class DecodedBlockHeader(object):
-    def __init__(self, data, raw=None):
-        self.data = data
-        self._raw = raw
-
-    def hash(self):
-        return default_hash(self.data)
-
-    def prev_header(self):
-        return self.data[1][1]
-
-    def slot(self):
-        if self.is_genesis():
-            epoch = self.data[1][3][0]
-            slotid = None
-        else:
-            epoch, slotid = self.data[1][3][0]
-        return epoch, slotid
-
-    def is_genesis(self):
-        return self.data[0] == 0
-
-    def raw(self):
-        return self._raw or cbor.dumps(self.data)
-
-class DecodedBlock(object):
-    def __init__(self, data, raw=None):
-        self.data = data
-        self._raw = raw
-
-    def header(self):
-        return DecodedBlockHeader([self.data[0], self.data[1][0]])
-
-    def is_genesis(self):
-        return self.data[0] == 0
-
-    def transactions(self):
-        if self.is_genesis():
-            return []
-        else:
-            return self.data[1][1][0] # GenericBlock -> MainBody -> [(Tx, TxWitness)]
-
-    def raw(self):
-        return self._raw or cbor.dumps(self.data)
-
 class GetHeaders(Worker):
     message_type = Message.GetHeaders
 
@@ -244,7 +196,7 @@ class GetHeaders(Worker):
         self.conv.send(cbor.dumps([cbor.VarList(from_), [to] if to else []]))
         tag, data = cbor.loads(self.conv.receive()) # sum type MsgHeaders
         assert tag == 0, 'no headers'
-        return map(DecodedBlockHeader, data)
+        return [DecodedBlockHeader(item) for item in data]
 
 class GetBlocks(Worker):
     message_type = Message.GetBlocks
@@ -269,7 +221,7 @@ def poll_tip(addr):
     current = None
     while True:
         # get tip
-        tip = next(headers_worker([], None))
+        tip = headers_worker([], None)[0]
         h = tip.hash()
         if h != current:
             for b in GetBlocks(node, addr)(current or h, h):
@@ -281,8 +233,8 @@ def poll_tip(addr):
                 txs = b.transactions()
                 if txs:
                     print('transactions:')
-                    for tx, _ in txs:
-                        print(binascii.hexlify(default_hash(tx)).decode())
+                    for tx in txs:
+                        print(binascii.hexlify(tx.hash()).decode())
                 else:
                     print('no transactions')
             current = h
@@ -293,7 +245,7 @@ def get_all_headers(addr, genesis):
     node = Node(Transport().endpoint())
 
     headers_worker = GetHeaders(node, addr)
-    tip = next(headers_worker([], None))
+    tip = headers_worker([], None)[0]
 
     print('tip', binascii.hexlify(tip.hash()), binascii.hexlify(tip.prev_header()))
     headers = headers_worker([genesis], tip.hash())

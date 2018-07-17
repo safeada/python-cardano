@@ -105,3 +105,5 @@ venv.bak/
 
 /cardano/cbits.h
 /cardano/cbits.c
+/test_db
+/tags
