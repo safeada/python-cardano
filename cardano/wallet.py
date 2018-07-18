@@ -3,7 +3,8 @@ Implement wallet logic following the formal wallet specification.
 '''
 
 import operator
-from collections import namedtuple
+from collections import namedtuple, deque
+from recordclass import recordclass
 
 # Basic Model.
 
@@ -52,12 +53,11 @@ def ours_txouts(txs, addrs):
 #    'Check if tx2 is dependent on tx1'
 #    return any(lambda txin: txin.txid == tx1.txid, tx2.inputs)
 
+Checkpoint = recordclass('Checkpoint', 'utxo pending utxo_balance')
 class Wallet(object):
     def __init__(self, addrs):
         self.addrs = set(addrs)
-        self.utxo = {}
-        self.pending = []
-        self._utxo_balance = 0
+        self.checkpoints = deque([Checkpoint({}, [], 0)], maxlen=2160)
 
     def change(self, txs):
         'return change UTxOs from transactions.'
@@ -65,52 +65,71 @@ class Wallet(object):
 
     def available_utxo(self):
         'available utxo'
-        utxo = self.utxo.copy()
-        return exclude_txins_inplace(txins(self.pending), utxo)
+        checkpoint = self.checkpoints[-1]
+        utxo = checkpoint.utxo.copy()
+        return exclude_txins_inplace(txins(checkpoint.pending), utxo)
 
     def total_utxo(self):
         'total utxo'
-        return {**self.available_utxo(), **self.change(self.pending)}
+        return {**self.available_utxo(), **self.change(self.checkpoints[-1].pending)}
 
     def available_balance(self):
-        return self._utxo_balance - balance(constraint_txins(txins(self.pending), self.utxo))
+        checkpoint = self.checkpoints[-1]
+        return checkpoint.utxo_balance - balance(constraint_txins(txins(checkpoint.pending), checkpoint.utxo))
 
     def total_balance(self):
-        return self.available_balance() + balance(self.change(self.pending))
+        return self.available_balance() + balance(self.change(self.checkpoints[-1].pending))
 
     def apply_block(self, txs):
-        txouts_ = ours_txouts(txs, self.addrs)
-        assert dom(txouts_) & dom(self.utxo) == set(), 'precondition doesn\'t meet'
+        checkpoint = self.checkpoints[-1]
 
-        txins_ = txins(txs) & (dom(self.utxo) | dom(txouts_))
+        txouts_ = ours_txouts(txs, self.addrs)
+        assert dom(txouts_) & dom(checkpoint.utxo) == set(), 'precondition doesn\'t meet'
+
+        txins_ = txins(txs) & (dom(checkpoint.utxo) | dom(txouts_))
         self.apply_filtered_block(txins_, txouts_)
 
     def apply_filtered_block(self, txins_, txouts_):
         # add new utxo.
-        self.utxo.update(txouts_)
-        utxo_spent = constraint_txins(txins_, self.utxo)
+        checkpoint = self.checkpoints[-1]
+        utxo = checkpoint.utxo.copy()
+        utxo.update(txouts_)
+        utxo_spent = constraint_txins(txins_, utxo)
         # remove spent utxo inplace.
-        exclude_txins_inplace(txins_, self.utxo)
-        self._utxo_balance += balance(txouts_) - balance(utxo_spent)
+        exclude_txins_inplace(txins_, utxo)
+        utxo_balance = checkpoint.utxo_balance + balance(txouts_) - balance(utxo_spent)
 
-        self.pending = filter(lambda tx: tx.inputs & txins_ == set, self.pending)
+        pending = filter(lambda tx: tx.inputs & txins_ == set, checkpoint.pending)
+
+        self.checkpoints.append(Checkpoint(utxo, pending, utxo_balance))
 
     def new_pending(self, tx):
         assert tx.inputs.issubset(dom(self.available_utxo())), 'precondition doesn\'t meet.'
-        self.pending.append(tx)
+        self.checkpoints[-1].pending.append(tx)
+
+    def rollback(self):
+        assert self.checkpoints, 'no checkpoint, impossible.'
+        if len(self.checkpoints) == 1:
+            checkpoint = self.checkpoints[0]
+            assert not checkpoint.pending and not checkpoint.utxo, 'impossible'
+        else:
+            checkpoint = self.checkpoints.pop()
+            self.checkpoints[-1].pending += checkpoint.pending
 
     # Invariants
     def invariant_3_4(self):
-        assert txins(self.pending).issubset(dom(self.utxo)), 'invariant 3.4 doesn\'t hold'
+        checkpoint = self.checkpoints[-1]
+        assert txins(checkpoint.pending).issubset(dom(checkpoint.utxo)), 'invariant 3.4 doesn\'t hold'
 
     def invariant_3_5(self):
-        assert all(txout.addr in self.addrs for txout in self.utxo.values()), 'invariant 3.5 doesn\'t hold'
+        assert all(txout.addr in self.addrs for txout in self.checkpoints[-1].utxo.values()), 'invariant 3.5 doesn\'t hold'
 
     def invariant_3_6(self):
-        assert dom(self.change(self.pending)) & dom(self.available_utxo()) == set(), 'invariant 3.6 doesn\'t hold'
+        assert dom(self.change(self.checkpoints[-1].pending)) & dom(self.available_utxo()) == set(), 'invariant 3.6 doesn\'t hold'
 
     def invariant_balance_cache(self):
-        assert self._utxo_balance == balance(self.utxo), 'balance cache broken.'
+        checkpoint = self.checkpoints[-1]
+        assert checkpoint.utxo_balance == balance(checkpoint.utxo), 'balance cache broken.'
         assert self.available_balance() == balance(self.available_utxo()), 'available balance is wrong'
         assert self.total_balance() == balance(self.total_utxo()), 'total balance is wrong'
 
