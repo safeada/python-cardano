@@ -44,20 +44,20 @@ def ours_txouts(txs, addrs):
 # Comment out current unused operations.
 #def txouts(txs):
 #    return {TxIn(tx.txid, ix): txout for tx in txs for ix, txout in enumerate(tx.outputs)}
-#
-#def new_utxo(txs):
-#    'new utxo added by these transactions.'
-#    return exclude_txins_inplace(txins(txs), txouts(txs))
-#
+
+def new_utxo(txs, addrs):
+    'new utxo added by these transactions and owned by addrs.'
+    return exclude_txins_inplace(txins(txs), ours_txouts(txs, addrs))
+
 #def dependent_on(tx2, tx1):
 #    'Check if tx2 is dependent on tx1'
 #    return any(lambda txin: txin.txid == tx1.txid, tx2.inputs)
 
-Checkpoint = recordclass('Checkpoint', 'utxo pending utxo_balance')
+Checkpoint = recordclass('Checkpoint', 'utxo expected_utxo pending utxo_balance')
 class Wallet(object):
     def __init__(self, addrs):
         self.addrs = set(addrs)
-        self.checkpoints = deque([Checkpoint({}, [], 0)], maxlen=2160)
+        self.checkpoints = deque([Checkpoint({}, {}, [], 0)], maxlen=2160)
 
     def change(self, txs):
         'return change UTxOs from transactions.'
@@ -101,7 +101,10 @@ class Wallet(object):
 
         pending = filter(lambda tx: tx.inputs & txins_ == set, checkpoint.pending)
 
-        self.checkpoints.append(Checkpoint(utxo, pending, utxo_balance))
+        new_utxo = exclude_txins_inplace(txins_, txouts_)
+        expected_utxo = exclude_txins_inplace(dom(new_utxo), checkpoint.expected_utxo.copy())
+
+        self.checkpoints.append(Checkpoint(utxo, expected_utxo, pending, utxo_balance))
 
     def new_pending(self, tx):
         assert tx.inputs.issubset(dom(self.available_utxo())), 'precondition doesn\'t meet.'
@@ -113,8 +116,11 @@ class Wallet(object):
             checkpoint = self.checkpoints[0]
             assert not checkpoint.pending and not checkpoint.utxo, 'impossible'
         else:
-            checkpoint = self.checkpoints.pop()
-            self.checkpoints[-1].pending += checkpoint.pending
+            old = self.checkpoints.pop()
+            new = self.checkpoints[-1]
+            new.pending += old.pending
+            new.expected_utxo.update(old.expected_utxo)
+            new.expected_utxo.update(exclude_txins_inplace(dom(new.utxo), old.utxo))
 
     # Invariants
     def invariant_3_4(self):
@@ -133,12 +139,26 @@ class Wallet(object):
         assert self.available_balance() == balance(self.available_utxo()), 'available balance is wrong'
         assert self.total_balance() == balance(self.total_utxo()), 'total balance is wrong'
 
+    def invariant_7_6(self):
+        checkpoint = self.checkpoints[-1]
+        assert dom(checkpoint.utxo) & dom(checkpoint.expected_utxo) == set(), 'invariant 7.6 doesn\'t hold'
+
+    def invariant_7_7(self):
+        assert all(txout.addr in self.addrs for txout in self.checkpoints[-1].expected_utxo.values()), 'invariant 7.7 doesn\'t hold'
+
+    def invariant_7_8(self):
+        checkpoint = self.checkpoints[-1]
+        assert txins(checkpoint.pending).issubset(dom({**checkpoint.utxo, **checkpoint.expected_utxo})), 'invariant 7.8 doesn\'t hold'
+
     def check_invariants(self):
         invariants = [
             self.invariant_3_4,
             self.invariant_3_5,
             self.invariant_3_6,
             self.invariant_balance_cache,
+            self.invariant_7_6,
+            self.invariant_7_7,
+            self.invariant_7_8,
         ]
         for inv in invariants:
             inv()
