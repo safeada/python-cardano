@@ -5,11 +5,11 @@ Implement wallet logic following the formal wallet specification.
 import operator
 from collections import namedtuple
 
-from .block import TxIn, TxOut
-
 # Basic Model.
 
 Tx = namedtuple('Tx', 'txid inputs outputs')
+TxIn = namedtuple('TxIn', 'txid ix')
+TxOut = namedtuple('TxOut', 'addr c')
 # UTxO :: Map TxIn TxOut
 
 def dependent_on(tx2, tx1):

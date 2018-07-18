@@ -7,9 +7,6 @@ import cbor
 def default_hash(v):
     return hashlib.blake2b(cbor.dumps(v), digest_size=32).digest()
 
-TxIn = namedtuple('TxIn', 'txid ix')
-TxOut = namedtuple('TxOut', 'addr c')
-
 class DecodedBlockHeader(object):
     def __init__(self, data, raw=None):
         self.data = data
@@ -40,28 +37,17 @@ class DecodedTransaction(object):
         self.data = data
         self.raw = raw
 
-    @property
+    def tx(self):
+        from .wallet import Tx, TxIn, TxOut
+        inputs = set(TxIn(*cbor.loads(item.value)) for tag, item in self.data[0] if tag == 0)
+        outputs = [TxOut(cbor.dumps(addr), c) for addr, c in self.data[1]]
+        return Tx(self.txid(), inputs, outputs)
+
     def txid(self):
         return default_hash(self.data)
 
-    @property
-    def inputs(self):
-        # filter TxInUtxo
-        return set(TxIn(*cbor.loads(item.value)) for tag, item in self.data[0] if tag == 0)
-
-    @property
-    def outputs(self):
-        return [TxOut(cbor.dumps(addr), c) for addr, c in self.data[1]]
-
     def raw(self):
         return self._raw or cbor.dumps(self.data)
-
-    def __str__(self):
-        inputs = ', '.join('(%s, %d)' % (binascii.hexlify(txid).decode(), ix) for txid, ix in self.inputs)
-        outputs = ', '.join('(%s, %d)' % (base58.b58encode(addr).decode(), c) for addr, c in self.outputs)
-        return 'txid: %s, inputs: [%s], outputs: [%s]' % (
-                binascii.hexlify(self.txid).decode(),
-                inputs, outputs)
 
 class DecodedBlock(object):
     def __init__(self, data, raw=None):
@@ -79,7 +65,7 @@ class DecodedBlock(object):
             return []
         else:
             # GenericBlock -> MainBody -> [(Tx, TxWitness)]
-            return [DecodedTransaction(tx) for tx, _ in self.data[1][1][0]]
+            return [DecodedTransaction(tx).tx() for tx, _ in self.data[1][1][0]]
 
     def raw(self):
         return self._raw or cbor.dumps(self.data)
