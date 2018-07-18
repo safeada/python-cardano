@@ -16,12 +16,6 @@ def dependent_on(tx2, tx1):
     'Check if tx2 is dependent on tx1'
     return any(lambda txin: txin.txid == tx1.txid, tx2.inputs)
 
-#def filter_ins(fn, utxo):
-#    return {txin:txout for txin, txout in utxo.items() if fn(txin)}
-
-def filter_outs(fn, utxo):
-    return {txin:txout for txin, txout in utxo.items() if fn(txout)}
-
 def constraint_txins(txins, utxo):
     # More efficient than filter_ins
     return {txin: utxo[txin] for txin in txins if txin in utxo}
@@ -46,7 +40,10 @@ def txins(txs):
     return result
 
 def txouts(txs):
-    return {(tx.txid, ix): txout for tx in txs for ix, txout in enumerate(tx.outputs)}
+    return {TxIn(tx.txid, ix): txout for tx in txs for ix, txout in enumerate(tx.outputs)}
+
+def ours_txouts(txs, addrs):
+    return {TxIn(tx.txid, ix): txout for tx in txs for ix, txout in enumerate(tx.outputs) if txout.addr in addrs}
 
 def new_utxo(txs):
     'new utxo added by these transactions.'
@@ -59,14 +56,9 @@ class Wallet(object):
         self.pending = []
         self._utxo_balance = 0
 
-    def ours_utxo(self, utxo):
-        'filter utxo belongs to us.'
-        # TODO efficiency
-        return filter_outs(lambda txout: txout.addr in self.addrs, utxo)
-
     def change(self, txs):
         'return change UTxOs from transactions.'
-        return self.ours_utxo(txouts(txs))
+        return ours_txouts(txs, self.addrs)
 
     def available_utxo(self):
         'available utxo'
@@ -84,17 +76,16 @@ class Wallet(object):
         return self.available_balance() + balance(self.change(self.pending))
 
     def apply_block(self, txs):
-        txouts_ = txouts(txs)
+        txouts_ = ours_txouts(txs, self.addrs)
         txins_ = txins(txs)
         assert dom(txouts_) & dom(self.utxo) == set(), 'precondition doesn\'t meet'
 
         # add new utxo.
-        utxo_new = self.ours_utxo(txouts_)
-        self.utxo.update(utxo_new)
+        self.utxo.update(txouts_)
         utxo_spent = constraint_txins(txins_, self.utxo)
         # remove spent utxo inplace.
         exclude_txins_inplace(txins_, self.utxo)
-        self._utxo_balance += balance(utxo_new) - balance(utxo_spent)
+        self._utxo_balance += balance(txouts_) - balance(utxo_spent)
 
         self.pending = filter(lambda tx: tx.inputs & txins_ == set, self.pending)
 
