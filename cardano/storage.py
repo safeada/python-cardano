@@ -16,9 +16,10 @@ Sync
 
 '''
 import os
+import binascii
 
-import rocksdb
 import cbor
+import rocksdb
 
 from .block import DecodedBlock, DecodedBlockHeader
 
@@ -45,16 +46,50 @@ class Storage(object):
             return DecodedBlockHeader(cbor.loads(buf), buf)
 
     def block(self, hdr):
-        db = self.open_epoch_db(hdr.slot()[0], True)
+        db = self.open_epoch_db(hdr.slot()[0], readonly=True)
         buf = db.get(hdr.hash())
         if buf:
             return DecodedBlock(cbor.loads(buf), buf)
 
-    #def block(self, hash):
-    #    hdr = self.blockheader(hash)
-    #    epoch, _ = hdr.slot()
-    #    db = self.open_epoch_db(epoch, readonly=True)
-    #    return cbor.loads(db.get(hash))
+    def blocks_rev(self):
+        current_epoch = None
+        current_epoch_db = None
+
+        h = self.tip()
+        while True:
+            hdr = self.blockheader(h)
+            epoch = hdr.slot()[0]
+            if epoch != current_epoch:
+                current_epoch = epoch
+                current_epoch_db = self.open_epoch_db(epoch, readonly=True)
+            buf = current_epoch_db.get(h)
+            assert buf, 'missing block: ' + binascii.hexlify(h)
+            yield DecodedBlock(cbor.loads(buf), buf)
+
+            if hdr.slot() == (0, None):
+                break
+            h = hdr.prev_header()
+
+    def blocks(self):
+        blocks = []
+        max_epoch = self.blockheader(self.tip()).slot()[0]
+        for epoch in range(max_epoch):
+            epoch_db = self.open_epoch_db(epoch, readonly=True)
+            h = epoch_db.get(b'tip')
+            if not h:
+                break
+            blocks = []
+            while True:
+                buf = epoch_db.get(h)
+                blk = DecodedBlock(cbor.loads(buf), buf)
+                blocks.append(blk)
+                hdr = blk.header()
+                h = hdr.prev_header()
+                if hdr.is_genesis():
+                    break
+
+            for blk in reversed(blocks):
+                yield blk
 
     def append_block(self, block):
         hdr = block.header()

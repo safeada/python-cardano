@@ -1,3 +1,4 @@
+from collections import namedtuple
 import hashlib
 import binascii
 import base58
@@ -5,6 +6,9 @@ import cbor
 
 def default_hash(v):
     return hashlib.blake2b(cbor.dumps(v), digest_size=32).digest()
+
+TxIn = namedtuple('TxIn', 'txid ix')
+TxOut = namedtuple('TxOut', 'addr c')
 
 class DecodedBlockHeader(object):
     def __init__(self, data, raw=None):
@@ -43,11 +47,11 @@ class DecodedTransaction(object):
     @property
     def inputs(self):
         # filter TxInUtxo
-        return set(tuple(cbor.loads(item.value)) for tag, item in self.data[0] if tag == 0)
+        return set(TxIn(*cbor.loads(item.value)) for tag, item in self.data[0] if tag == 0)
 
     @property
     def outputs(self):
-        return [(cbor.dumps(addr), c) for addr, c in self.data[1]]
+        return [TxOut(cbor.dumps(addr), c) for addr, c in self.data[1]]
 
     def raw(self):
         return self._raw or cbor.dumps(self.data)

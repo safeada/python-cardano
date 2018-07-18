@@ -4,14 +4,12 @@ Implement wallet logic following the formal wallet specification.
 
 import operator
 from collections import namedtuple
-from recordclass import recordclass
+
+from .block import TxIn, TxOut
 
 # Basic Model.
 
-
 Tx = namedtuple('Tx', 'txid inputs outputs')
-TxIn = namedtuple('TxIn', 'txid ix')
-TxOut = namedtuple('TxOut', 'addr c')
 # UTxO :: Map TxIn TxOut
 
 def dependent_on(tx2, tx1):
@@ -32,10 +30,13 @@ def dom(utxo):
 
 # Txs :: List(Tx)
 def txins(txs):
-    return reduce(operator.or_, (tx.inputs for tx in txs))
+    result = set()
+    for tx in txs:
+        result |= tx.inputs
+    return result
 
 def txouts(txs):
-    return {(tx.txid, ix): txout for ix, txout in enumerate(tx.outputs) for tx in txs}
+    return {(tx.txid, ix): txout for tx in txs for ix, txout in enumerate(tx.outputs)}
 
 def new_utxo(txs):
     'new utxo added by these transactions.'
@@ -74,7 +75,7 @@ class Wallet(object):
     def apply_block(self, txs):
         assert dom(txouts(txs)) & dom(self.utxo) == set(), 'precondition doesn\'t meet'
         txins_ = txins(txs)
-        self.utxo = filter_ins(lambda txin: txin not in txins_, self.utxo | self.change(txs))
+        self.utxo = filter_ins(lambda txin: txin not in txins_, {**self.utxo, **self.change(txs)})
         self.pending = [tx for tx in self.pending if tx.inputs & txins_ == set()]
 
     def new_pending(self, tx):
@@ -103,12 +104,29 @@ class Wallet(object):
 if __name__ == '__main__':
     # Test with local database.
     import cbor, binascii
+    import random
     from .storage import Storage
-    store = Storage('test_db', True)
-    hdr = store.blockheader(store.tip())
-    while hdr:
-        blk = store.block(hdr)
-        for tx in blk.transactions():
-            print(tx)
+    store = Storage('test_db', readonly=True)
+    def random_addresses(threshold):
+        addrs = set()
+        for blk in store.blocks():
+            for tx in blk.transactions():
+                for txout in tx.outputs:
+                    if random.random() < 0.1:
+                        addrs.add(txout.addr)
+                        if len(addrs) > threshold:
+                            return addrs
 
-        hdr = store.blockheader(hdr.prev_header())
+    print('Collect random addresses to test.')
+    w = Wallet(random_addresses(10000))
+    print('Apply blocks')
+    b = w.available_balance()
+    for blk in store.blocks():
+        txs = blk.transactions()
+        if txs:
+            w.apply_block(txs)
+            w.check_invariants()
+            n = w.available_balance()
+            if n != b:
+                b = n
+                print('balance changed', b)
