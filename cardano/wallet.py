@@ -16,11 +16,21 @@ def dependent_on(tx2, tx1):
     'Check if tx2 is dependent on tx1'
     return any(lambda txin: txin.txid == tx1.txid, tx2.inputs)
 
-def filter_ins(fn, utxo):
-    return {txin:txout for txin, txout in utxo.items() if fn(txin)}
+#def filter_ins(fn, utxo):
+#    return {txin:txout for txin, txout in utxo.items() if fn(txin)}
 
 def filter_outs(fn, utxo):
     return {txin:txout for txin, txout in utxo.items() if fn(txout)}
+
+def constraint_txins(txins, utxo):
+    # More efficient than filter_ins
+    return {txin: utxo[txin] for txin in txins if txin in utxo}
+
+def exclude_txins_inplace(txins, utxo):
+    # More efficient than filter_ins
+    for txin in txins:
+        utxo.pop(txin, None)
+    return utxo
 
 def balance(utxo):
     return sum(txout.c for txout in utxo.values())
@@ -40,17 +50,18 @@ def txouts(txs):
 
 def new_utxo(txs):
     'new utxo added by these transactions.'
-    txins_ = txins(txs)
-    return filter_ins(lambda txin: txin in txins_, txouts(txs))
+    return exclude_txins_inplace(txins(txs), txouts(txs))
 
 class Wallet(object):
     def __init__(self, addrs):
         self.addrs = set(addrs)
         self.utxo = {}
         self.pending = []
+        self._utxo_balance = 0
 
     def ours_utxo(self, utxo):
         'filter utxo belongs to us.'
+        # TODO efficiency
         return filter_outs(lambda txout: txout.addr in self.addrs, utxo)
 
     def change(self, txs):
@@ -59,24 +70,33 @@ class Wallet(object):
 
     def available_utxo(self):
         'available utxo'
-        txins_ = txins(self.pending)
-        return filter_ins(lambda txin: txin not in txins_, self.utxo)
+        utxo = self.utxo.copy()
+        return exclude_txins_inplace(txins(self.pending), utxo)
 
     def total_utxo(self):
         'total utxo'
-        return self.available_utxo() | self.change(self.pending)
+        return {**self.available_utxo(), **self.change(self.pending)}
 
     def available_balance(self):
-        return balance(self.available_utxo())
+        return self._utxo_balance - balance(constraint_txins(txins(self.pending), self.utxo))
 
     def total_balance(self):
-        return balance(self.total_utxo())
+        return self.available_balance() + balance(self.change(self.pending))
 
     def apply_block(self, txs):
-        assert dom(txouts(txs)) & dom(self.utxo) == set(), 'precondition doesn\'t meet'
+        txouts_ = txouts(txs)
         txins_ = txins(txs)
-        self.utxo = filter_ins(lambda txin: txin not in txins_, {**self.utxo, **self.change(txs)})
-        self.pending = [tx for tx in self.pending if tx.inputs & txins_ == set()]
+        assert dom(txouts_) & dom(self.utxo) == set(), 'precondition doesn\'t meet'
+
+        # add new utxo.
+        utxo_new = self.ours_utxo(txouts_)
+        self.utxo.update(utxo_new)
+        utxo_spent = constraint_txins(txins_, self.utxo)
+        # remove spent utxo inplace.
+        exclude_txins_inplace(txins_, self.utxo)
+        self._utxo_balance += balance(utxo_new) - balance(utxo_spent)
+
+        self.pending = filter(lambda tx: tx.inputs & txins_ == set, self.pending)
 
     def new_pending(self, tx):
         assert tx.inputs.issubset(dom(self.available_utxo())), 'precondition doesn\'t meet.'
@@ -92,11 +112,17 @@ class Wallet(object):
     def invariant_3_6(self):
         assert dom(self.change(self.pending)) & dom(self.available_utxo()) == set(), 'invariant 3.6 doesn\'t hold'
 
+    def invariant_balance_cache(self):
+        assert self._utxo_balance == balance(self.utxo), 'balance cache broken.'
+        assert self.available_balance() == balance(self.available_utxo()), 'available balance is wrong'
+        assert self.total_balance() == balance(self.total_utxo()), 'total balance is wrong'
+
     def check_invariants(self):
         invariants = [
             self.invariant_3_4,
             self.invariant_3_5,
             self.invariant_3_6,
+            self.invariant_balance_cache,
         ]
         for inv in invariants:
             inv()
