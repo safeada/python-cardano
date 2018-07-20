@@ -11,17 +11,19 @@ The code is reverse engineered from cardano-sl, the cbits is copied from cardano
     $ source .env/bin/activate
     $ pip install -r requirements.txt
     $ python setup.py build_ext --inplace
-    $ python -mcardano.address
-    wallet id Ae2tdPwUPEZKyArxpKiJu9qDf4yrBb8mJc6aNqiNi72NqRkJKTmCXHJqWVE
-    experimental wallet id 12MM1pbyTk2WuZEnfiicX9gHF4YtFYL8ebUkr1hp
-    first address DdzFFzCqr...dwHkv6aazr
+
+    $ mkdir ./test_db
+    $ python -mcardano.sync ./test_db
+    sync block data from mainnet...
+    $ python -mcardano.address ./test_db
+    test recovering from local block data...
 
 Modules
 -------
 
 * ``cardano.address``
 
-  Implement Cardano HD address derivation and encoding.
+  Implement Cardano HD address derivation and encoding, and wallet recovering for lagacy address format.
 
 * ``cardano.transport``
 
@@ -41,7 +43,7 @@ Modules
 
 * ``cardano.sync``
 
-  Download block data with cardano-sl node.
+  Download block data with cardano-sl mainnet.
 
 * ``cardano.wallet``
 

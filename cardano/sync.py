@@ -28,6 +28,10 @@ def sync(store, node, addr, genesis, genesis_prev):
             store.append_block(blk)
             continue
 
+        if local_tip == network_tip:
+            print('sync finished')
+            break
+
         print('get headers')
         hdrs = list(headers_worker([local_tip], network_tip))
         print('get blocks')
@@ -52,7 +56,8 @@ def sync(store, node, addr, genesis, genesis_prev):
         print('finish', blk.header().slot())
 
 if __name__ == '__main__':
-    store = Storage('./test_db')
+    import sys
+    store = Storage(sys.argv[1])
     node = Node(Transport().endpoint())
     genesis = binascii.unhexlify(b'89d9b5a5b8ddc8d7e5a6795e9774d97faf1efea59b2caf7eaf9f8c5b32059df4')
     genesis_prev = binascii.unhexlify(b'5f20df933584822601f9e3f8c024eb5eb252fe8cefb24d1317dc3d432e940ebb')

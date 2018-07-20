@@ -85,12 +85,11 @@ def encode_with_crc(v):
 
 def encode_addr(addr):
     h = addr_hash(addr)
-    bs = encode_with_crc([
+    return encode_with_crc([
         h,
         addr[2],
         addr[0]
     ])
-    return base58.b58encode(bs)
 
 def addr_hash_short(addr):
     'Shorten hash result to 20 bytes.'
@@ -103,17 +102,15 @@ def encode_with_crc_short(v):
     return b'\x00' + s + struct.pack('<I', binascii.crc32(s))
 
 def encode_addr_short(addr):
-    addr[2].pop(1, None) # Don't encode derive path in address.
-    h = addr_hash_short(addr)
-    bs = encode_with_crc_short([
-        h,
-        addr[2],
+    attrs = addr[2].copy()
+    attrs.pop(1, None) # Don't encode derive path in address.
+    return encode_with_crc_short([
+        addr_hash_short(addr),
+        attrs,
         addr[0]
     ])
-    return base58.b58encode(bs)
 
 def decode_addr(s):
-    s = base58.b58decode(s)
     if s[0] == 0:
         # version byte for new encoding.
         crc32, = struct.unpack('<I', s[-4:])
@@ -145,7 +142,6 @@ def recover_from_blocks(blocks, hdpass):
     for blk in blocks:
         for tx in blk.transactions():
             for out in tx.outputs:
-                addr = base58.b58encode(out.addr)
                 path = get_derive_path(addr, hdpass)
                 if path:
                     print('found', addr)
@@ -157,21 +153,22 @@ def recover_from_storage(store, hdpass):
 
 def test_encode_address(words, passphase):
     root_xpriv = gen_root_xpriv(mnemonic_to_seed(words), passphase)
-    print('wallet id', encode_addr(root_addr(xpriv_to_xpub(root_xpriv))).decode())
-    print('wallet id[short]', encode_addr_short(root_addr(xpriv_to_xpub(root_xpriv))).decode())
-    addr = encode_addr(derive_address(root_xpriv, passphase, [FIRST_HARDEN_INDEX, FIRST_HARDEN_INDEX]))
-    print('first address', addr.decode())
-    addr_short = encode_addr_short(derive_address(root_xpriv, passphase, [FIRST_HARDEN_INDEX, FIRST_HARDEN_INDEX]))
-    print('first address[short]', addr_short.decode())
-    print('decode', decode_addr(addr))
-    print('decode[short]', decode_addr(addr_short))
+    addr = root_addr(xpriv_to_xpub(root_xpriv))
+    print('wallet id', base58.b58encode(encode_addr(addr)).decode())
+    print('wallet id[short]', base58.b58encode(encode_addr_short(addr)).decode())
+    addr = derive_address(root_xpriv, passphase, [FIRST_HARDEN_INDEX, FIRST_HARDEN_INDEX])
+    print('first address', base58.b58encode(encode_addr(addr)).decode())
+    addr = derive_address(root_xpriv, passphase, [FIRST_HARDEN_INDEX, FIRST_HARDEN_INDEX])
+    print('first address[short]', base58.b58encode(encode_addr_short(addr)).decode())
+    print('decode', decode_addr(encode_addr(addr)))
+    print('decode[short]', decode_addr(encode_addr_short(addr)))
 
     hdpass = derive_hdpassphase(xpriv_to_xpub(root_xpriv))
-    print('decrypte derive path', get_derive_path(addr, hdpass))
+    print('decrypte derive path', get_derive_path(encode_addr(addr), hdpass))
 
-def test_recover(words, passphase):
+def test_recover(dbpath, words, passphase):
     from .storage import Storage
-    store = Storage('./test_db')
+    store = Storage(dbpath)
 
     root_xpriv = gen_root_xpriv(mnemonic_to_seed(words), passphase)
     hdpass = derive_hdpassphase(xpriv_to_xpub(root_xpriv))
@@ -181,4 +178,5 @@ if __name__ == '__main__':
     import getpass
     passphase = getpass.getpass('Input passphase:').encode()
     words = 'ring crime symptom enough erupt lady behave ramp apart settle citizen junk'
-    test_encode_address(words, passphase)
+    #test_encode_address(words, passphase)
+    test_recover(sys.argv[1], words, passphase)
