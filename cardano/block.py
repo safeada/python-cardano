@@ -1,11 +1,17 @@
+'''
+Main data structures of blockchain.
+
+Rather than fully decode the data into python object, we access the required fields from cbor data.
+It's more efficient this way at most scenario.
+
+We also try to cache raw data, to prevent re-serialization.
+'''
 from collections import namedtuple
 import hashlib
 import binascii
 import base58
 import cbor
-
-def default_hash(v):
-    return hashlib.blake2b(cbor.dumps(v), digest_size=32).digest()
+from .utils import hash_serialized, hash_data
 
 class DecodedBlockHeader(object):
     def __init__(self, data, raw=None):
@@ -13,12 +19,17 @@ class DecodedBlockHeader(object):
         self._raw = raw
 
     def hash(self):
-        return default_hash(self.data)
+        return hash_serialized(self.raw())
 
     def prev_header(self):
         return self.data[1][1]
 
     def slot(self):
+        '''
+        (epoch, slotid)
+
+        slotid: None means genesis block.
+        '''
         if self.is_genesis():
             epoch = self.data[1][3][0]
             slotid = None
@@ -44,7 +55,7 @@ class DecodedTransaction(object):
         return Tx(self.txid(), inputs, outputs)
 
     def txid(self):
-        return default_hash(self.data)
+        return hash_data(self.data)
 
     def raw(self):
         return self._raw or cbor.dumps(self.data)

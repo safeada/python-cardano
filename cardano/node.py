@@ -209,9 +209,9 @@ class GetBlocks(Worker):
             if not buf:
                 # closed by remote.
                 break
-            tag, data = cbor.loads(buf)
+            tag, data = cbor.loads(buf) # \x82, \x00, block_raw_data
             if tag == 0: # MsgBlock
-                result.append(DecodedBlock(data))
+                result.append(DecodedBlock(data, buf[2:]))
         return result
 
 def poll_tip(addr):

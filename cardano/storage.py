@@ -60,6 +60,7 @@ class Storage(object):
             hdr = self.blockheader(h)
             epoch = hdr.slot()[0]
             if epoch != current_epoch:
+                print('epoch', epoch)
                 current_epoch = epoch
                 current_epoch_db = self.open_epoch_db(epoch, readonly=True)
             buf = current_epoch_db.get(h)
