@@ -203,7 +203,6 @@ class GetBlocks(Worker):
 
     def __call__(self, from_, to):
         self.conv.send(cbor.dumps([from_, to]))
-        result = []
         while True:
             buf = self.conv.receive()
             if not buf:
@@ -211,8 +210,37 @@ class GetBlocks(Worker):
                 break
             tag, data = cbor.loads(buf) # \x82, \x00, block_raw_data
             if tag == 0: # MsgBlock
-                result.append(DecodedBlock(data, buf[2:]))
-        return result
+                yield DecodedBlock(data, buf[2:])
+
+class StreamBlocks(Worker):
+    message_type = Message.Stream
+
+    def __call__(self, from_, to, n):
+        self.conv.send(cbor.dumps([
+            0,
+            [0, cbor.VarList(from_), to, n]
+        ]))
+        yield from self._receive_stream()
+
+    def update(self, n):
+        self.conv.send(cbor.dumps([
+            1,
+            [0, n]
+        ]))
+        yield from self._receive_stream()
+
+    def _receive_stream(self):
+        while True:
+            buf = self.conv.receive()
+            if not buf:
+                # closed by remote.
+                print('connection closed')
+                break
+            tag, data = cbor.loads(buf) # \x82, \x00, block_raw_data
+            if tag != 0:
+                print('stream ended', tag, data)
+                break
+            yield DecodedBlock(data, buf[2:])
 
 def poll_tip(addr):
     node = Node(Transport().endpoint())
@@ -258,9 +286,16 @@ def get_all_headers(addr, genesis):
             current = hdr.prev_header()
     assert current == genesis
 
+def test_stream_block(addr, genesis):
+    node = Node(Transport().endpoint())
+    tip = GetHeaders(node, addr)([], None)[0]
+    worker = StreamBlocks(node, addr)
+    for blk in worker([genesis], tip.hash(), 10):
+        print(blk.header().slot())
+
 if __name__ == '__main__':
     addr = 'relays.cardano-mainnet.iohk.io:3000:0'
+    genesis = binascii.unhexlify(b'89d9b5a5b8ddc8d7e5a6795e9774d97faf1efea59b2caf7eaf9f8c5b32059df4'),
     poll_tip(addr)
-
-    #genesis = binascii.unhexlify(b'89d9b5a5b8ddc8d7e5a6795e9774d97faf1efea59b2caf7eaf9f8c5b32059df4'),
+    #test_stream_block(addr, genesis)
     #get_all_headers(addr, genesis)
