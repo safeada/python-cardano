@@ -172,7 +172,7 @@ if __name__ == '__main__':
     def random_addresses(threshold):
         addrs = set()
         for blk in store.blocks():
-            for tx in blk.transactions():
+            for tx in blk.txs():
                 for txout in tx.outputs:
                     if random.random() < 0.1:
                         addrs.add(txout.addr)
@@ -184,11 +184,9 @@ if __name__ == '__main__':
     print('Apply blocks')
     b = w.available_balance()
     for blk in store.blocks():
-        txs = blk.transactions()
-        if txs:
-            w.apply_block(txs)
-            w.check_invariants()
-            n = w.available_balance()
-            if n != b:
-                b = n
-                print('balance changed', b)
+        w.apply_block(blk.txs())
+        w.check_invariants()
+        n = w.available_balance()
+        if n != b:
+            b = n
+            print('balance changed', b)

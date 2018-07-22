@@ -5,7 +5,7 @@ from .transport import Transport
 from .node import Node, GetHeaders, GetBlocks
 
 def sync(store, node, addr, genesis, genesis_prev):
-    headers_worker = GetHeaders(node, addr)
+    headers_worker = node.client(addr, GetHeaders)
 
     current_epoch = 0
     current_epoch_db = None
@@ -18,7 +18,7 @@ def sync(store, node, addr, genesis, genesis_prev):
         local_tip = store.tip()
         if not local_tip:
             # get genesis block.
-            blk = GetBlocks(node, addr)(genesis, genesis)[0]
+            blk = node.client(addr, GetBlocks)(genesis, genesis)[0]
             assert blk.header().prev_header() == genesis_prev and blk.header().slot() == (0, None), 'invalid genesis block.'
             assert current_epoch_db == None, 'impossible'
             current_epoch_db = store.open_epoch_db(0)
@@ -35,7 +35,7 @@ def sync(store, node, addr, genesis, genesis_prev):
         print('get headers')
         hdrs = list(headers_worker([local_tip], network_tip))
         print('get blocks')
-        blocks = list(GetBlocks(node, addr)(hdrs[-1].hash(), hdrs[0].hash()))
+        blocks = list(node.client(addr, GetBlocks)(hdrs[-1].hash(), hdrs[0].hash()))
         assert blocks[0].header().prev_header() == local_tip, 'validate fail.'
 
         print('store blocks')

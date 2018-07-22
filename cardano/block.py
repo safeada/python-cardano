@@ -46,7 +46,10 @@ class DecodedBlockHeader(object):
 class DecodedTransaction(object):
     def __init__(self, data, raw=None):
         self.data = data
-        self.raw = raw
+        self._raw = raw
+
+    def hash(self):
+        return hash_serialized(self.raw())
 
     def tx(self):
         from .wallet import Tx, TxIn, TxOut
@@ -76,7 +79,11 @@ class DecodedBlock(object):
             return []
         else:
             # GenericBlock -> MainBody -> [(Tx, TxWitness)]
-            return [DecodedTransaction(tx).tx() for tx, _ in self.data[1][1][0]]
+            return [DecodedTransaction(tx) for tx, _ in self.data[1][1][0]]
+
+    def txs(self):
+        'Transaction list in wallet Tx format.'
+        return map(lambda t: t.tx(), self.transactions())
 
     def raw(self):
         return self._raw or cbor.dumps(self.data)
