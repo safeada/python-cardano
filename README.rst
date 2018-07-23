@@ -16,13 +16,13 @@ Why Python
 
 Python is still one of the most cleanly designed, developer friendly programming language out there, has a reputation of
 executable pseudocode. And lightweight thread provided by gevent makes it suitable to write networking software, and easy
-interoperability with C thanks to Cython which  enables us to improve performance incrementally.
+interoperability with C thanks to Cython enables us to improve performance incrementally.
 
 With python, we can develop clean prototype very fast, with good performance. And in the future we can always move the CPU intensive code to C
 after we indentified the hotspot.
 
-Install & Testing
-------------------
+Build & Test
+------------
 
 .. code-block:: shell
 
@@ -37,6 +37,11 @@ Install & Testing
     $ python -mcardano.address ./test_db
     recovering test wallet from local block data...
 
+Features
+--------
+
+* Store block data of different epochs in seperate rocksdb database, provides better disk usage(fully synchronized mainchain takes 1.3G disk space), and allows faster synchronization in the future.
+
 Modules
 -------
 
@@ -46,7 +51,7 @@ Modules
 
 * ``cardano.transport``
 
-  Implement Haskell's network-transport-tcp, multiplex lots of lightweight unidirectional connections on a single tcp connection.
+  Implement Haskell's network-transport-tcp, multiplex multiple lightweight unidirectional connections on a single tcp connection.
 
 * ``cardano.node``
 
