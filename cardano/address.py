@@ -138,14 +138,20 @@ def get_derive_path(addr, hdpass):
         return unpack_addr_payload(cbor.loads(payload), hdpass)
 
 def recover_from_blocks(blocks, hdpass):
+    print('Start iterating blocks...')
     addrs = {} # addr -> derive path
+    count = 0
     for blk in blocks:
-        for tx in blk.transactions():
+        for tx in blk.txs():
             for out in tx.outputs:
-                path = get_derive_path(addr, hdpass)
+                path = get_derive_path(out.addr, hdpass)
                 if path:
-                    print('found', addr)
+                    print('found address', base58.b58encode(out.addr))
                     addrs[out.addr] = path
+        count += 1
+        if count % 10000 == 0:
+            print(count, 'blocks')
+
     return addrs
 
 def recover_from_storage(store, hdpass):
@@ -175,6 +181,7 @@ def test_recover(dbpath, words, passphase):
     print(recover_from_storage(store, hdpass))
 
 if __name__ == '__main__':
+    import sys
     import getpass
     passphase = getpass.getpass('Input passphase:').encode()
     words = 'ring crime symptom enough erupt lady behave ramp apart settle citizen junk'

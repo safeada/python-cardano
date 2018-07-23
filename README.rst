@@ -1,9 +1,28 @@
-cardano-utils
-=============
+Python-Cardano
+==============
 
-Python library for Cardano crypto primitives. Maybe could grows into a Cardano wallet in python.
+Python implementation of Cardano project, including network protocol, crypto primitives, wallet logic, and more.
 
-The code is reverse engineered from cardano-sl, the cbits is copied from cardano-crypto and cryptonite shamelessly.
+Why This Project
+----------------
+
+* We want to explore alternate design decisions to support lightweight wallet, and start developing the mobile wallet for Cardano. Current official wallet node is not enough yet.
+* Explore the design space of clustered wallet node.
+* Provide alternative implementation of Cardano protocols and specifications in another programming language.
+* In the future, it could be an alternative foundation for projects in Cardano ecosystem: wallets, side-chains, MPCs.
+
+Why Python
+----------
+
+Python is still one of the most cleanly designed, developer friendly programming language out there, has a reputation of
+executable pseudocode. And lightweight thread provided by gevent makes it suitable to write networking software, and easy
+interoperability with C thanks to Cython which  enables us to improve performance incrementally.
+
+With python, we can develop clean prototype very fast, with good performance. And in the future we can always move the CPU intensive code to C
+after we indentified the hotspot.
+
+Install & Testing
+------------------
 
 .. code-block:: shell
 
@@ -16,7 +35,7 @@ The code is reverse engineered from cardano-sl, the cbits is copied from cardano
     $ python -mcardano.sync ./test_db
     sync block data from mainnet...
     $ python -mcardano.address ./test_db
-    test recovering from local block data...
+    recovering test wallet from local block data...
 
 Modules
 -------
