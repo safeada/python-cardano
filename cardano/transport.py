@@ -4,6 +4,8 @@ Multiplex lightweight unidirectional connections onto single tcp connection.
 https://cardanodocs.com/technical/protocols/network-transport/
 '''
 
+# TODO all the evt.wait need to has timeout.
+
 import struct
 import enum
 import random
@@ -21,6 +23,7 @@ from recordclass import recordclass
 PROTOCOL_VERSION = 0
 LIGHT_ID_MIN = 1024
 HEAVY_ID_MIN = 1
+WAIT_TIMEOUT = 60 # Maximum wait timeout on Events.
 
 # Utils
 
@@ -52,7 +55,7 @@ def random_endpoint_address():
     return uuid.uuid4().hex
 
 def endpoint_connect(addr, local_addr):
-    host, port, id = addr.rsplit(':', 2)
+    host, port, id = addr.rsplit(b':', 2)
     id = int(id)
     try:
         sock = gevent.socket.create_connection((host, port))
@@ -111,14 +114,16 @@ class RemoteEndPoint(object):
     Closing = recordclass('Closing', 'evt_resolve valid_state')
     Closed = recordclass('Closed', '')
     class Valid(object):
-        def __init__(self, sock):
+        def __init__(self, sock, origin):
+            self.socket = sock
+            self.origin = origin
+
             self.outgoing = 0  # number of lightweight connections.
 
             self.incomings = set()
             self.last_incoming = 0
 
             self.next_light_id = LIGHT_ID_MIN
-            self.socket = sock
 
             self.probing_thread = None
 
@@ -238,7 +243,7 @@ class LocalEndPoint(object):
     def get_remote_endpoint(self, addr, origin):
         '''
         get or create shared RemoteEndPoint instance.
-          origin: 'us' means outgoing connection, 'their' means incoming connection.
+          origin: 'us' means outgoing connection, 'them' means incoming connection.
         '''
         lst = self.valid_state
         assert lst != None, 'local endpoint is closed.'
@@ -253,17 +258,20 @@ class LocalEndPoint(object):
             else:
                 st = remote.state
                 if isinstance(st, RemoteEndPoint.Valid):
-                    if origin == 'us':
-                        st.outgoing += 1
                     return remote, False
                 elif isinstance(st, RemoteEndPoint.Init):
                     if origin == 'us':
-                        # wait for ongoing init finish.
+                        # wait for ongoing init finish, no need to set timeout here, dependent on another connect request.
                         st.evt_resolve.wait()
                         continue # retry
                     elif st.origin == 'us':
-                        # Incoming connection while outgoing connection in progress.
-                        pass
+                        if self.addr > addr:
+                            # Wait for the previous connect request finish.
+                            assert st.evt_crossed.wait(WAIT_TIMEOUT)
+                            return remote, True
+                        else:
+                            # Reject the connection request.
+                            return remote, False
                     else:
                         assert False, 'already connected [impossible]'
                 elif isinstance(st, RemoteEndPoint.Closing):
@@ -332,16 +340,23 @@ class LocalEndPoint(object):
             if sock:
                 if result == HandshakeResponse.Accepted:
                     gevent.spawn(self.process_messages_loop, sock, remote)
-                    remote.resolve_init(RemoteEndPoint.Valid(sock))
+                    remote.resolve_init(RemoteEndPoint.Valid(sock, 'us'))
+                elif result == HandshakeResponse.Crossed:
+                    assert isinstance(remote.state, RemoteEndPoint.Init), 'invalid remote state'
+                    sock.close()
+                    remote.state.evt_crossed.set()
+                    assert remote.state.evt_resolve.wait(WAIT_TIMEOUT)
                 else:
-                    # TODO handle socket closing.
-                    raise NotImplementedError('connect fail: %s' % result)
+                    remote.resolve_init(RemoteEndPoint.Closed())
+                    sock.close()
+                    return
             else:
                 remote.resolve_init(RemoteEndPoint.Error('connec failed'))
 
         # create lightweight connection.
         st = remote.state
         assert isinstance(st, RemoteEndPoint.Valid), 'RemoteEndPoint state is invalid: ' + str(st)
+        st.outgoing += 1
         lid = st.gen_next_light_id()
         st.socket.sendall(pack_u32(ControlHeader.CreatedNewConnection) + pack_u32(lid))
 
@@ -413,6 +428,10 @@ class Transport(object):
             self._addr = (addr[0], self._server.address[1])
             self._server.start()
 
+    def close(self):
+        # TODO close all the endpoints and connections.
+        self._server.stop()
+
     @property
     def addr(self):
         return self._addr
@@ -439,19 +458,20 @@ class Transport(object):
                 recv_exact(sock, handshake_len)
                 continue
 
+            # endpoint id
             local = self._local_endpoints.get(unpack_u32(recv_exact(sock, 4)))
             if not local:
                 sock.sendall(pack_u32(HandshakeResponse.InvalidRequest))
                 break
 
-            # recv address
+            # remote address
             size = unpack_u32(recv_exact(sock, 4))
             remote_addr = None
-            if size:
+            if size > 0:
                 remote_addr = recv_exact(sock, size)
-                (host, _, _) = remote_addr.rsplit(':', 2)
+                (host, _, _) = remote_addr.rsplit(b':', 2)
                 # check their host TODO getnameinfo
-                num_host = addr[0]
+                num_host = addr[0].encode()
                 if host != num_host:
                     # address mismatch
                     send_many(sock, 
@@ -465,15 +485,19 @@ class Transport(object):
                 # local state has to be valid.
                 local.valid_state.remove_if_invalid(remote_addr)
 
-            remote, new = local.get_remote_endpoint(remote_addr, 'their')
+            remote, new = local.get_remote_endpoint(remote_addr, 'them')
             if not new:
-                sock.sendall(pack_u32(int(HandshakeResponse.Crossed)))
+                sock.sendall(pack_u32(HandshakeResponse.Crossed))
+                # Maybe the connection is already closed at remote end, prob it.
                 st = remote.valid_state
                 if st:
                     st.start_probing()
             else:
+                # send success response
+                sock.sendall(pack_u32(HandshakeResponse.Accepted))
+                remote.resolve_init(RemoteEndPoint.Valid(sock, 'them'))
                 local.process_messages_loop(sock, remote)
-                remote.resolve_init(RemoteEndPoint.Valid(sock))
+
             break
 
 if __name__ == '__main__':
