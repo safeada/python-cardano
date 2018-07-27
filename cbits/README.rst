@@ -1,0 +1,1 @@
+These c files is copied from `cardano-crypto <https://github.com/input-output-hk/cardano-crypto/tree/master/cbits>`_ and `cryptonite <https://github.com/haskell-crypto/cryptonite/tree/master/cbits>`_ .
