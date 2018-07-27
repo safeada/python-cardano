@@ -14,7 +14,7 @@ import gevent.event
 from .transport import Transport, ControlHeader, Event
 from .block import DecodedBlockHeader, DecodedBlock
 
-PROTOCOL_MAGIC = 764824073
+from .constants import WAIT_TIMEOUT, PROTOCOL_MAGIC
 
 class Message(enum.IntEnum):
     Void = 0
@@ -27,63 +27,33 @@ class Message(enum.IntEnum):
     Stream = 15
     StreamBlock = 16
 
-DEFAULT_PEER_DATA = [
-    PROTOCOL_MAGIC, # protocol magic.
-    [0,1,0],   # version
-    { # services, recv msg code -> send msg code
-        #Message.GetHeaders:     [0, cbor.Tag(24, cbor.dumps(Message.Headers))],
-        #Message.Headers:        [0, cbor.Tag(24, cbor.dumps(Message.GetHeaders))],
-        #Message.GetBlocks:      [0, cbor.Tag(24, cbor.dumps(Message.Block))],
-        #0x22:  [0, cbor.Tag(24, cbor.dumps(0x5e))],
-        #0x25:  [0, cbor.Tag(24, cbor.dumps(0x5e))],
-        #0x2b:  [0, cbor.Tag(24, cbor.dumps(0x5d))],
-        #0x31:  [0, cbor.Tag(24, cbor.dumps(0x5c))],
-        #0x37:  [0, cbor.Tag(24, cbor.dumps(0x62))],
-        #0x3d:  [0, cbor.Tag(24, cbor.dumps(0x61))],
-        #0x43:  [0, cbor.Tag(24, cbor.dumps(0x60))],
-        #0x49:  [0, cbor.Tag(24, cbor.dumps(0x5f))],
-        #0x53:  [0, cbor.Tag(24, cbor.dumps(0x00))],
-        #0x5c:  [0, cbor.Tag(24, cbor.dumps(0x31))],
-        #0x5d:  [0, cbor.Tag(24, cbor.dumps(0x2b))],
-        #0x5e:  [0, cbor.Tag(24, cbor.dumps(0x25))],
-        #0x5f:  [0, cbor.Tag(24, cbor.dumps(0x49))],
-        #0x60:  [0, cbor.Tag(24, cbor.dumps(0x43))],
-        #0x61:  [0, cbor.Tag(24, cbor.dumps(0x3d))],
-        #0x62:  [0, cbor.Tag(24, cbor.dumps(0x37))],
-    },
-    { # clients, send msg code -> recv msg code.
-        Message.GetHeaders:     [0, cbor.Tag(24, cbor.dumps(Message.Headers))],
-        Message.Headers:        [0, cbor.Tag(24, cbor.dumps(Message.GetHeaders))],
-        Message.GetBlocks:      [0, cbor.Tag(24, cbor.dumps(Message.Block))],
-        Message.Stream:         [0, cbor.Tag(24, cbor.dumps(Message.StreamBlock))],
-        #0x0d:  [0, cbor.Tag(24, cbor.dumps(0x00))],
-        #0x0e:  [0, cbor.Tag(24, cbor.dumps(0x00))],
-        #0x25:  [0, cbor.Tag(24, cbor.dumps(0x5e))],
-        #0x2b:  [0, cbor.Tag(24, cbor.dumps(0x5d))],
-        #0x31:  [0, cbor.Tag(24, cbor.dumps(0x5c))],
-        #0x37:  [0, cbor.Tag(24, cbor.dumps(0x62))],
-        #0x3d:  [0, cbor.Tag(24, cbor.dumps(0x61))],
-        #0x43:  [0, cbor.Tag(24, cbor.dumps(0x60))],
-        #0x49:  [0, cbor.Tag(24, cbor.dumps(0x5f))],
-        #0x53:  [0, cbor.Tag(24, cbor.dumps(0x00))],
-    },
-]
+MessageSndRcv = {
+    Message.GetHeaders: Message.Headers,
+    Message.GetBlocks: Message.Block,
+    Message.Stream: Message.StreamBlock,
+}
+
+def make_peer_data(workers, listeners):
+    peer_data = [PROTOCOL_MAGIC, [0, 1, 0], {}, {}]
+    for cls in workers:
+        peer_data[3][cls.message_type] = [0, cbor.Tag(24, cbor.dumps(MessageSndRcv[cls.message_type]))]
+    for msgtype in listeners.keys():
+        peer_data[2][msgtype] = [0, cbor.Tag(24, cbor.dumps(MessageSndRcv[msgtype]))]
+    return peer_data
 
 class Conversation(object):
     'Bidirectional connection.'
-    def __init__(self, id, conn):
-        self._id = id
-        self._conn = conn # client unidirectional lightweight connection.
-        self._queue = gevent.queue.Queue(maxsize=128)
-        self._evt_handshake = gevent.event.Event()
-        self.peer_data = None
+    def __init__(self, conn, queue, peer_data):
+        self._conn = conn    # sending side.
+        self._queue = queue  # receive message.
+        self._peer_data = peer_data
 
     def __gc__(self):
         self.close()
 
     @property
-    def id(self):
-        return self._id
+    def peer_data(self):
+        return self._peer_data
 
     def send(self, data):
         self._conn.send(data)
@@ -110,24 +80,40 @@ class Conversation(object):
         self._queue.put(StopIteration)
 
 class Node(object):
-    def __init__(self, ep):
+    def __init__(self, ep, workers, listeners):
         self._endpoint = ep
-        self._peer_sending = {} # addr -> state (None | done | evt)
-        self._peer_received = {} # addr -> state
+        self._workers = {cls.message_type: cls for cls in workers}
+        self._listeners = listeners
+        self._peer_data = make_peer_data(workers, listeners)
 
-        self._conversations = {} # (nonce, addr) -> Conversation
-        self._server_conns = {} # connid -> None | nonce
+        # The first connect request send peer data, other concurrent requests need to wait, addr -> state (None | 'done' | Event)
+        self._peer_sending = {}
+        # Received peer_data, addr -> peer_data
+        self._peer_received = {}
+
+        # Address of incoming connections, connid -> addr
+        self._incoming_addr = {}
+        # Incoming connections in handshaking, connid -> nonce
+        self._incoming_nonce = {}
+        # All incoming message queues, connid -> Queue
+        self._incoming_queues = {}
+
+        # Sending side wait for message queue, (nonce, addr) -> AsyncResult
+        self._wait_for_queue = {}
 
         self._next_nonce = random.randint(0, sys.maxsize)
-
         self._dispatcher_thread = gevent.spawn(self.dispatcher)
+
+    @property
+    def endpoint(self):
+        return self._endpoint
 
     def gen_next_nonce(self):
         n = self._next_nonce
         self._next_nonce = (self._next_nonce + 1) % sys.maxsize
         return n
 
-    def connect(self, addr):
+    def _connect_peer(self, addr):
         conn = self._endpoint.connect(addr)
 
         # Waiting for peer data to be transmitted.
@@ -138,22 +124,31 @@ class Node(object):
             # transmit and notify pending connections.
             evt = gevent.event.Event()
             self._peer_sending[addr] = evt
-            conn.send(cbor.dumps(DEFAULT_PEER_DATA, True))
+            conn.send(cbor.dumps(self._peer_data, sort_keys=True))
             self._peer_sending[addr] = 'done'
             evt.set()
         else:
             assert isinstance(st, gevent.event.Event), 'invalid state: ' + str(st)
             st.wait() # wait for peer data transmiting.
+        return conn
 
+    def connect(self, addr):
+        conn = self._connect_peer(addr)
+
+        # start handshake
         nonce = self.gen_next_nonce()
-        conv_key = (nonce, addr)
-        conv = Conversation(conv_key, conn)
-        self._conversations[conv_key] = conv
-
         conn.send(b'S' + struct.pack('>Q', nonce))
-        conv._evt_handshake.wait() # wait for handshake reply.
-        conv.peer_data = self._peer_received[addr]
-        return conv
+
+        # wait for ack and receiving queue.
+        evt = gevent.event.AsyncResult()
+        self._wait_for_queue[(nonce, addr)] = evt
+        try:
+            queue = evt.get(timeout=WAIT_TIMEOUT)
+        except gevent.exceptions.Timeout:
+            self._wait_for_queue.pop((nonce, addr))
+            conn.close()
+            raise
+        return Conversation(conn, queue, self._peer_received[addr])
 
     def dispatcher(self):
         ep = self._endpoint
@@ -161,42 +156,65 @@ class Node(object):
             ev = ep.receive()
             tp = type(ev)
             if tp == Event.ConnectionOpened:
-                assert ev.connid not in self._server_conns, 'duplicate connection id.'
-                # TODO waiting for peer data.
-                self._server_conns[ev.connid] = (None, ev.addr)
+                assert ev.connid not in self._incoming_addr, 'duplicate connection id.'
+                self._incoming_addr[ev.connid] = ev.addr
             elif tp == Event.Received:
-                nonce, addr = self._server_conns[ev.connid]
+                addr = self._incoming_addr[ev.connid]
                 if addr not in self._peer_received:
                     # not received peerdata yet, assuming this is it.
                     self._peer_received[addr] = cbor.loads(ev.data)
                     continue
+
+                nonce = self._incoming_nonce.get(ev.connid)
                 if nonce == None:
-                    assert ev.data[:1] == b'A', 'dont support listeners yet.'
+                    direction = ev.data[:1]
                     nonce = struct.unpack('>Q', ev.data[1:])[0]
-                    self._server_conns[ev.connid] = (nonce, addr)
-                    self._conversations[(nonce, addr)]._evt_handshake.set()
+                    self._incoming_nonce[ev.connid] = nonce
+
+                    queue = gevent.queue.Queue(32)
+                    self._incoming_queues[ev.connid] = queue
+
+                    if direction == b'A':
+                        self._wait_for_queue.pop((nonce, addr)).set(queue)
+                    elif direction == b'S':
+                        gevent.spawn(self._handle_incoming, addr, nonce, queue)
+                    else:
+                        assert False, 'invalid request message.'
                 else:
                     # normal data.
-                    self._conversations[(nonce, addr)]._queue.put(ev.data)
+                    self._incoming_queues[ev.connid].put(ev.data)
             elif tp == Event.ConnectionClosed:
-                nonce, addr = self._server_conns.pop(ev.connid)
-                conv = self._conversations.pop((nonce, addr))
-                conv.on_close()
+                self._incoming_addr.pop(ev.connid)
+                self._incoming_nonce.pop(ev.connid, None)
+                queue = self._incoming_queues.pop(ev.connid, None)
+                if queue:
+                    # close the queue.
+                    queue.put(StopIteration)
             else:
                 print('unhandled event', ev)
 
-    def client(self, addr, cls):
-        msgtype = cls.message_type
-        if msgtype not in DEFAULT_PEER_DATA[3]:
-            print('Don\'t support this message type.')
-            return
+    def _handle_incoming(self, addr, nonce, queue):
+        # Will use the exist tcp connection.
+        conn = self._connect_peer(addr)
+        conn.send(b'A' + struct.pack('>Q', nonce))
+        conv = Conversation(conn, queue, self._peer_received[addr])
 
+        # run listener.
+        try:
+            msgcode = cbor.loads(queue.get())
+            self._listeners[msgcode](self, conv)
+        finally:
+            conv.close()
+
+    def worker(self, msgtype, addr):
+        cls = self._workers[msgtype]
+        assert cls.message_type == msgtype
         conv = self.connect(addr)
         if msgtype not in conv.peer_data[2]:
             print('Remote peer don\'t support this message type.')
             return
 
-        conv.send(cbor.dumps(cls.message_type))
+        conv.send(cbor.dumps(msgtype))
         return cls(conv)
 
 class Client(object):
@@ -260,16 +278,47 @@ class StreamBlocks(Client):
                 break
             yield DecodedBlock(data, buf[2:])
 
+def handle_get_headers(node, conv):
+    # TODO
+    while True:
+        data = conv.receive()
+        if not data:
+            print('remote closed')
+            break
+        print('request', cbor.loads(data))
+        conv.send(cbor.dumps([0, []]))
+
+def handle_get_blocks(node, conv):
+    # TODO
+    data = cbor.loads(conv.receive())
+    print('request', data)
+    conv.send(cbor.dumps([1]))
+
+def handle_stream_blocks(node, conv):
+    # TODO
+    pass
+
+def default_node(ep):
+    return Node(ep, [
+        GetHeaders,
+        GetBlocks,
+        StreamBlocks,
+    ], {
+        Message.GetHeaders: handle_get_headers,
+        #Message.GetBlocks: handle_get_blocks,
+        #Message.Stream: handle_stream_blocks,
+    })
+
 def poll_tip(addr):
-    node = Node(Transport().endpoint())
-    headers_client = node.client(addr, GetHeaders)
+    node = default_node(Transport().endpoint())
+    headers_client = node.worker(Message.GetHeaders, addr)
     current = None
     while True:
         # get tip
         tip = headers_client([], None)[0]
         h = tip.hash()
         if h != current:
-            for b in node.client(addr, GetBlocks)(current or h, h):
+            for b in node.worker(Message.GetBlocks, addr)(current or h, h):
                 hdr = b.header()
                 h = hdr.hash()
                 if h == current:
@@ -312,7 +361,7 @@ def test_stream_block(addr, genesis):
         print(blk.header().slot())
 
 if __name__ == '__main__':
-    addr = 'relays.cardano-mainnet.iohk.io:3000:0'
+    addr = b'relays.cardano-mainnet.iohk.io:3000:0'
     genesis = binascii.unhexlify(b'89d9b5a5b8ddc8d7e5a6795e9774d97faf1efea59b2caf7eaf9f8c5b32059df4')
     poll_tip(addr)
     #test_stream_block(addr, genesis)

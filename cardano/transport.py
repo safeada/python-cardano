@@ -20,10 +20,9 @@ import gevent.server
 import cbor
 from recordclass import recordclass
 
+from .constants import LIGHT_ID_MIN, HEAVY_ID_MIN, WAIT_TIMEOUT
+
 PROTOCOL_VERSION = 0
-LIGHT_ID_MIN = 1024
-HEAVY_ID_MIN = 1
-WAIT_TIMEOUT = 60 # Maximum wait timeout on Events.
 
 # Utils
 
@@ -504,7 +503,7 @@ if __name__ == '__main__':
     ep = Transport().endpoint() # Unaddressable transport.
     #ep = Transport(('127.0.0.1', 3000)).endpoint()
     print('connect')
-    conn = ep.connect('relays.cardano-mainnet.iohk.io:3000:0')
+    conn = ep.connect(b'relays.cardano-mainnet.iohk.io:3000:0')
 
     # cardano node handshake.
     # send peer data.
