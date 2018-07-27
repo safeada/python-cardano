@@ -109,7 +109,7 @@ class RemoteEndPoint(object):
 
     # Different states
     Error = recordclass('Error', 'error')
-    Init = recordclass('Init', 'evt_resolve evt_crossed origin') # origin: us | them
+    Init = recordclass('Init', 'evt_resolve origin') # origin: us | them
     Closing = recordclass('Closing', 'evt_resolve valid_state')
     Closed = recordclass('Closed', '')
     class Valid(object):
@@ -148,7 +148,7 @@ class RemoteEndPoint(object):
     def __init__(self, local, addr, id, origin):
         self._id = id
         self._addr = addr
-        self._state = RemoteEndPoint.Init(gevent.event.Event(), gevent.event.Event(), origin)
+        self._state = RemoteEndPoint.Init(gevent.event.Event(), origin)
         self._local = local
 
     @property
@@ -265,8 +265,6 @@ class LocalEndPoint(object):
                         continue # retry
                     elif st.origin == 'us':
                         if self.addr > addr:
-                            # Wait for the previous connect request finish.
-                            assert st.evt_crossed.wait(WAIT_TIMEOUT)
                             return remote, True
                         else:
                             # Reject the connection request.
@@ -341,10 +339,15 @@ class LocalEndPoint(object):
                     gevent.spawn(self.process_messages_loop, sock, remote)
                     remote.resolve_init(RemoteEndPoint.Valid(sock, 'us'))
                 elif result == HandshakeResponse.Crossed:
-                    assert isinstance(remote.state, RemoteEndPoint.Init), 'invalid remote state'
-                    sock.close()
-                    remote.state.evt_crossed.set()
-                    assert remote.state.evt_resolve.wait(WAIT_TIMEOUT)
+                    if isinstance(remote.state, RemoteEndPoint.Init):
+                        # Remote connection request has not came yet, remove the endpoint.
+                        remote.resolve_init(RemoteEndPoint.Closed())
+                        sock.close()
+                        return
+                    else:
+                        # Remote connection already arrived, then re-use the connection.
+                        assert isinstance(remote.state, RemoteEndPoint.Valid)
+                        sock.close()
                 else:
                     remote.resolve_init(RemoteEndPoint.Closed())
                     sock.close()
@@ -492,9 +495,10 @@ class Transport(object):
                 if st:
                     st.start_probing()
             else:
+                remote.resolve_init(RemoteEndPoint.Valid(sock, 'them'))
+
                 # send success response
                 sock.sendall(pack_u32(HandshakeResponse.Accepted))
-                remote.resolve_init(RemoteEndPoint.Valid(sock, 'them'))
                 local.process_messages_loop(sock, remote)
 
             break
