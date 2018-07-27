@@ -37,8 +37,8 @@ Build & Test
     $ python -mcardano.address ./test_db
     recovering test wallet from local block data...
 
-Features
---------
+Unique Features
+---------------
 
 * Store block data of different epochs in seperate rocksdb database, provides better disk usage(fully synchronized mainchain takes 1.3G disk space), and allows faster synchronization in the future.
 
@@ -72,3 +72,10 @@ Modules
 * ``cardano.wallet``
 
   Implement wallet logic according to formal specification.
+
+TODOs
+-----
+
+* BIP44 wallet.
+* Wallet state storage, a simple solution first, hopefully something like Haskell's acid-state in the end.
+* Support listeners in ``cardano.node``, then implement block serving listeners, then a fully functional relay node.
