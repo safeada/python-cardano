@@ -217,14 +217,14 @@ class Node(object):
         conv.send(cbor.dumps(msgtype))
         return cls(conv)
 
-class Client(object):
+class Worker(object):
     def __init__(self, conv):
         self.conv = conv
 
     def close(self):
         self.conv.close()
 
-class GetHeaders(Client):
+class GetHeaders(Worker):
     message_type = Message.GetHeaders
 
     def __call__(self, from_, to):
@@ -234,7 +234,7 @@ class GetHeaders(Client):
             return []
         return [DecodedBlockHeader(item) for item in data]
 
-class GetBlocks(Client):
+class GetBlocks(Worker):
     message_type = Message.GetBlocks
 
     def __call__(self, from_, to):
@@ -248,7 +248,7 @@ class GetBlocks(Client):
             if tag == 0: # MsgBlock
                 yield DecodedBlock(data, buf[2:])
 
-class StreamBlocks(Client):
+class StreamBlocks(Worker):
     message_type = Message.Stream
 
     def start(self, from_, to, n):

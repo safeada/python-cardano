@@ -13,14 +13,23 @@ import base58
 import cbor
 from .utils import hash_serialized, hash_data
 
-class DecodedBlockHeader(object):
+class DecodedBase(object):
     def __init__(self, data, raw=None):
         self.data = data
         self._raw = raw
 
+    @staticmethod
+    def from_raw(self, raw):
+        return DecodedBlockHeader(cbor.loads(raw), raw)
+
+    def raw(self):
+        return self._raw or cbor.dumps(self.data)
+
     def hash(self):
         return hash_serialized(self.raw())
 
+
+class DecodedBlockHeader(DecodedBase):
     def prev_header(self):
         return self.data[1][1]
 
@@ -40,17 +49,8 @@ class DecodedBlockHeader(object):
     def is_genesis(self):
         return self.data[0] == 0
 
-    def raw(self):
-        return self._raw or cbor.dumps(self.data)
 
-class DecodedTransaction(object):
-    def __init__(self, data, raw=None):
-        self.data = data
-        self._raw = raw
-
-    def hash(self):
-        return hash_serialized(self.raw())
-
+class DecodedTransaction(DecodedBase):
     def tx(self):
         from .wallet import Tx, TxIn, TxOut
         inputs = set(TxIn(*cbor.loads(item.value)) for tag, item in self.data[0] if tag == 0)
@@ -60,14 +60,8 @@ class DecodedTransaction(object):
     def txid(self):
         return hash_data(self.data)
 
-    def raw(self):
-        return self._raw or cbor.dumps(self.data)
 
-class DecodedBlock(object):
-    def __init__(self, data, raw=None):
-        self.data = data
-        self._raw = raw
-
+class DecodedBlock(DecodedBase):
     def header(self):
         return DecodedBlockHeader([self.data[0], self.data[1][0]])
 
@@ -82,8 +76,22 @@ class DecodedBlock(object):
             return [DecodedTransaction(tx) for tx, _ in self.data[1][1][0]]
 
     def txs(self):
-        'Transaction list in wallet Tx format.'
+        'Transaction list in wallet format.'
         return map(lambda t: t.tx(), self.transactions())
 
-    def raw(self):
-        return self._raw or cbor.dumps(self.data)
+    def utxos(self):
+        'Set of inputs spent, and UTxO created.'
+        from .wallet import Tx, TxIn, TxOut
+        txins = set()
+        utxo = {}
+        # Process in reversed order, so we can remote inputs spent by current block.
+        for t in reversed(self.transactions()):
+            tx = t.tx()
+            for idx, txout in enumerate(tx.outputs):
+                # new utxo
+                txin = TxIn(tx.txid, idx)
+                if txin not in txins:
+                    utxo[txin] = txout
+            for txin in tx.inputs:
+                txins.add(txin)
+        return txins, utxo

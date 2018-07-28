@@ -3,7 +3,6 @@
 * Store each epoch in seperate db.
     hash -> block data
     genesis -> hash of genesis block of epoch.
-    tip -> hash of last block of epoch.
 * Main database:
   * 'c/tip' -> hash
   * 'b/' + hash -> BlockHeader
@@ -28,6 +27,20 @@ import rocksdb
 
 from .block import DecodedBlock, DecodedBlockHeader
 
+def iter_prefix(db, prefix):
+    it = db.iteritems()
+    it.seek(prefix)
+    for k, v in it:
+        if not k.startswith(prefix):
+            break
+        yield k, v
+
+def remove_prefix(db, prefix):
+    batch = rocksdb.WriteBatch()
+    for k, _ in iter_prefix(db, prefix):
+        batch.delete(k)
+    db.write(batch)
+
 class Storage(object):
     def __init__(self, root_path, readonly=False):
         self._root_path = root_path
@@ -45,9 +58,9 @@ class Storage(object):
             self._tip = self.db.get(b'c/tip')
         return self._tip
 
-    def set_tip(self, s):
+    def set_tip(self, s, batch=None):
         self._tip = s
-        self.db.put(b'c/tip', s)
+        (batch or self.db).put(b'c/tip', s)
 
     def genesis_block_hash(self):
         return self.open_epoch_db(0).get(b'genesis')
@@ -137,15 +150,14 @@ class Storage(object):
 
     def blockheaders_noorder(self):
         'Iterate block header in rocksdb order, fastest.'
-        it = self.db.iteritems()
-        it.seek(b'b/')
-        for k, raw in it:
-            if not k.startswith(b'b/'):
-                break
-            yield DecodedBlockHeader(cbor.loads(raw), raw)
+        return map(
+            lambda _, raw: DecodedBlockHeader(cbor.loads(raw), raw),
+            iter_prefix(self.db, b'b/')
+        )
 
     def append_block(self, block):
         hdr = block.header()
+        batch = rocksdb.WriteBatch()
 
         # check prev_hash
         tip = self.tip()
@@ -153,6 +165,22 @@ class Storage(object):
             assert hdr.prev_header() == tip, 'invalid block.'
 
         hash = hdr.hash()
-        self.db.put(b'b/' + hash, hdr.raw())
-        self.db.put(b'e/fl/' + hdr.prev_header(), hash)
-        self.set_tip(hash)
+        batch.put(b'b/' + hash, hdr.raw())
+        batch.put(b'e/fl/' + hdr.prev_header(), hash)
+        self.utxo_apply_block(block, batch)
+        self.set_tip(hash, batch)
+        self.db.write(batch)
+
+    def utxo_apply_block(self, block, batch):
+        txins, utxo = block.utxos()
+        for txin in txins:
+            batch.delete(b'ut/t/' + cbor.dumps(txin))
+        for txin, txout in utxo.items():
+            batch.put(b'ut/t/' + cbor.dumps(txin), cbor.dumps(txout))
+
+    def iter_utxo(self):
+        from .wallet import TxIn, TxOut
+        prefix = b'ut/t/'
+        for k, v in iter_prefix(self.db, prefix):
+            yield TxIn(*cbor.loads(k[len(prefix):])), TxOut(*cbor.loads(v))
+
