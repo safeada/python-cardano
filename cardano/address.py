@@ -22,7 +22,9 @@ import base58
 from tlslite.utils.chacha20_poly1305 import CHACHA20_POLY1305
 
 from . import cbits
+from .cbits import DERIVATION_V1, DERIVATION_V2
 from .utils import hash_serialized, hash_data
+from .constants import BIP44_PURPOSE,, BIP44_COIN_TYPE
 
 FIRST_HARDEN_INDEX = 2147483648
 
@@ -122,13 +124,21 @@ def decode_addr(s):
     assert binascii.crc32(s) == crc32, 'crc32 checksum don\'t match.'
     return cbor.loads(s)
 
-def derive_address(xpriv, passphase, path):
-    hdpass = derive_hdpassphase(xpriv_to_xpub(xpriv))
+def derive_key(xpriv, passphase, path, derivation_schema):
     for idx in path:
         xpriv = cbits.encrypted_derive_private(
-            xpriv, passphase, idx, cbits.DERIVATION_V1
+            xpriv, passphase, idx, derivation_schema
         )
-    return hd_addr(xpriv_to_xpub(xpriv), path, hdpass)
+    return xpriv
+
+def derive_address(xpriv, passphase, path, derivation_schema):
+    xpriv = derive_key(xpriv, passphase, path, derivation_schema)
+    xpub = xpriv_to_xpub(xpriv)
+    return hd_addr(xpub, path, derive_hdpassphase(xpub))
+
+def bip44_derive_address(xpriv, passphase, derivation_schema, account, change, index):
+    path = [BIP44_PURPOSE, BIP44_COIN_TYPE, account, change, index]
+    return derive_address(xpriv, passphase, path, derivation_schema)
 
 def get_derive_path(addr, hdpass):
     'Get derive path from lagacy address.'
@@ -162,9 +172,9 @@ def test_encode_address(words, passphase):
     addr = root_addr(xpriv_to_xpub(root_xpriv))
     print('wallet id', base58.b58encode(encode_addr(addr)).decode())
     print('wallet id[short]', base58.b58encode(encode_addr_short(addr)).decode())
-    addr = derive_address(root_xpriv, passphase, [FIRST_HARDEN_INDEX, FIRST_HARDEN_INDEX])
+    addr = derive_address(root_xpriv, passphase, [FIRST_HARDEN_INDEX, FIRST_HARDEN_INDEX], DERIVATION_V1)
     print('first address', base58.b58encode(encode_addr(addr)).decode())
-    addr = derive_address(root_xpriv, passphase, [FIRST_HARDEN_INDEX, FIRST_HARDEN_INDEX])
+    addr = derive_address(root_xpriv, passphase, [FIRST_HARDEN_INDEX, FIRST_HARDEN_INDEX], DERIVATION_V1)
     print('first address[short]', base58.b58encode(encode_addr_short(addr)).decode())
     print('decode', decode_addr(encode_addr(addr)))
     print('decode[short]', decode_addr(encode_addr_short(addr)))
