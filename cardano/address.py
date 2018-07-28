@@ -24,7 +24,7 @@ from tlslite.utils.chacha20_poly1305 import CHACHA20_POLY1305
 from . import cbits
 from .cbits import DERIVATION_V1, DERIVATION_V2
 from .utils import hash_serialized, hash_data
-from .constants import BIP44_PURPOSE,, BIP44_COIN_TYPE
+from .constants import BIP44_PURPOSE, BIP44_COIN_TYPE
 
 FIRST_HARDEN_INDEX = 2147483648
 
