@@ -29,8 +29,11 @@ class Message(enum.IntEnum):
 
 MessageSndRcv = {
     Message.GetHeaders: Message.Headers,
+    Message.Headers: Message.GetHeaders,
     Message.GetBlocks: Message.Block,
     Message.Stream: Message.StreamBlock,
+    Message.Subscribe: Message.Void,
+    Message.Subscribe1: Message.Void,
 }
 
 def make_peer_data(workers, listeners):
@@ -144,7 +147,7 @@ class Node(object):
         self._wait_for_queue[(nonce, addr)] = evt
         try:
             queue = evt.get(timeout=WAIT_TIMEOUT)
-        except gevent.exceptions.Timeout:
+        except gevent.Timeout:
             self._wait_for_queue.pop((nonce, addr))
             conn.close()
             raise
@@ -278,35 +281,67 @@ class StreamBlocks(Worker):
                 break
             yield DecodedBlock(data, buf[2:])
 
+class Subscribe(Worker):
+    message_type = Message.Subscribe
+
+    def __call__(self):
+        # instance Bi MsgSubscribe
+        self.conv.send(cbor.dumps(42))
+        while True:
+            gevent.sleep(20)
+            # keep alive
+            self.conv.send(cbor.dumps(43))
+
+class Subscribe1(Worker):
+    message_type = Message.Subscribe1
+
+    def __call__(self):
+        # instance Bi MsgSubscribe1
+        self.conv.send(cbor.dumps(42))
+
 def handle_get_headers(node, conv):
-    # TODO
+    'Peer wants some block headers from us.'
     while True:
         data = conv.receive()
         if not data:
             print('remote closed')
             break
         print('request', cbor.loads(data))
-        conv.send(cbor.dumps([0, []]))
+        conv.send(cbor.dumps([0, []])) # NoHeaders
 
 def handle_get_blocks(node, conv):
-    # TODO
+    'Peer wants some blocks from us.'
     data = cbor.loads(conv.receive())
     print('request', data)
-    conv.send(cbor.dumps([1]))
+    conv.send(cbor.dumps([1])) # NoBlock
 
-def handle_stream_blocks(node, conv):
-    # TODO
+def handle_stream_start(node, conv):
+    'Peer wants to stream some blocks from us.'
     pass
+
+def handle_headers(node, conv):
+    'Peer has a block header for us (yes, singular only).'
+    data = conv.receive()
+    if not data:
+        print('remote closed')
+        return
+    tag, headers = cbor.loads(data)
+    assert tag==0 and len(headers) == 1, 'invalid header message'
+    hdr = DecodedBlockHeader(headers[0])
+    print('got block header', binascii.hexlify(hdr.hash()))
 
 def default_node(ep):
     return Node(ep, [
         GetHeaders,
         GetBlocks,
         StreamBlocks,
+        Subscribe,
+        Subscribe1,
     ], {
         Message.GetHeaders: handle_get_headers,
         #Message.GetBlocks: handle_get_blocks,
-        #Message.Stream: handle_stream_blocks,
+        #Message.Stream: handle_stream_start,
+        Message.Headers: handle_headers,
     })
 
 def poll_tip(addr):
@@ -363,6 +398,8 @@ def test_stream_block(addr, genesis):
 if __name__ == '__main__':
     addr = b'relays.cardano-mainnet.iohk.io:3000:0'
     genesis = binascii.unhexlify(b'89d9b5a5b8ddc8d7e5a6795e9774d97faf1efea59b2caf7eaf9f8c5b32059df4')
-    poll_tip(addr)
+    #poll_tip(addr)
     #test_stream_block(addr, genesis)
     #get_all_headers(addr, genesis)
+    node = default_node(Transport().endpoint())
+    node.worker(Message.Subscribe, addr)()
