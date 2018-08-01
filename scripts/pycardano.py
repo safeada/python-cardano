@@ -17,6 +17,13 @@ def input_passphase():
         passphase = getpass.getpass('Input passphase:').encode()
     return passphase
 
+def load_wallet_config(args):
+    cfg_path = os.path.join(args.root, 'wallets', args.name+'.json')
+    if not os.path.exists(cfg_path):
+        print('wallet config is not exists:', args.name)
+        return
+    return json.load(open(cfg_path))
+
 def handle_sync(args):
     from cardano.sync import sync
     from cardano.node import Transport, default_node
@@ -38,6 +45,52 @@ def handle_run(args):
     transport = Transport()
     node = default_node(transport.endpoint())
     node.worker(Message.Subscribe, b'relays.cardano-mainnet.iohk.io:3000:0')()
+
+def handle_sign(args):
+    from cardano.address import derive_hdpassphase, xpriv_to_xpub, get_derive_path, derive_key, DERIVATION_V1, verify_address
+    from cardano.cbits import encrypted_sign
+    passphase = input_passphase()
+    cfg = load_wallet_config(args)
+    root_xpriv = binascii.unhexlify(cfg['root_key'])
+    root_xpub = xpriv_to_xpub(root_xpriv)
+    hdpass = derive_hdpassphase(root_xpub)
+    addr = base58.b58decode(args.addr)
+    path = get_derive_path(addr, hdpass)
+    if path == None:
+        print('the address don\'t belong to this wallet')
+        return
+    xpriv = derive_key(root_xpriv, passphase, path, DERIVATION_V1)
+    xpub = xpriv_to_xpub(xpriv)
+    if not verify_address(addr, xpub):
+        print('the passphase is wrong')
+        return
+    sig = encrypted_sign(xpriv, passphase, args.message.encode('utf-8'))
+    print(json.dumps({
+        'xpub': binascii.hexlify(xpub).decode(),
+        'addr': args.addr,
+        'msg': args.message,
+        'sig': binascii.hexlify(sig).decode(),
+    }))
+
+def handle_verify(args):
+    from cardano.address import verify_address
+    from cardano.cbits import verify
+
+    data = json.loads(args.json)
+    addr = base58.b58decode(data['addr'])
+    xpub = binascii.unhexlify(data['xpub'])
+    pub = xpub[:32]
+    msg = data['msg'].encode('utf-8')
+    sig = binascii.unhexlify(data['sig'])
+
+    # verify address and pubkey
+    if not verify_address(addr, xpub):
+        print('address and xpub is mismatched')
+        return
+
+    # verify signature and pubkey
+    result = verify(pub, msg, sig)
+    print('signature is right' if result else 'signature is wrong')
 
 def handle_recache_utxo(args):
     store = Storage(args.db)
@@ -96,13 +149,6 @@ def handle_wallet_create(args):
 def handle_wallet_recover(args):
     return create_wallet_with_mnemonic(args, args.mnemonic, True)
 
-def load_wallet_config(args):
-    cfg_path = os.path.join(args.root, 'wallets', args.name+'.json')
-    if not os.path.exists(cfg_path):
-        print('wallet config is not exists:', args.name)
-        return
-    return json.load(open(cfg_path))
-
 def handle_wallet_balance(args):
     cfg = load_wallet_config(args)
     root_key = binascii.unhexlify(cfg['root_key'])
@@ -110,13 +156,18 @@ def handle_wallet_balance(args):
     hdpass = derive_hdpassphase(xpriv_to_xpub(root_key))
 
     # iterate utxo.
+    print('Searching for utxo...')
     store = Storage(args.root)
-    balance = 0
+    txouts = []
     for txin, txout in store.iter_utxo():
         if get_derive_path(txout.addr, hdpass):
-            balance += txout.c
+            txouts.append(txout)
 
-    print(balance)
+    balance = sum(out.c for out in txouts)
+    print('balance:', balance)
+    print('details:')
+    for out in txouts:
+        print(base58.b58encode(out.addr), out.c)
 
 def handle_wallet_list(args):
     wallet_dir = os.path.join(args.root, 'wallets')
@@ -159,6 +210,24 @@ def cli_parser():
     p.set_defaults(handler=handle_recache_utxo)
     p = sp_utxo.add_parser('stat', help='View statistics of current UTxO cache.')
     p.set_defaults(handler=handle_stat_utxo)
+
+    p = sp_root.add_parser('sign', help='sign message with your secret key')
+    p.set_defaults(handler=handle_sign)
+    p.add_argument('message', metavar='MESSAGE', help='message to sign')
+    p.add_argument('--name',
+        metavar = 'NAME',
+        required = True,
+        help = 'name of wallet',
+    )
+    p.add_argument('--addr',
+        metavar = 'ADDR',
+        required = True,
+        help = 'ada address belongs to the wallet',
+    )
+
+    p = sp_root.add_parser('verify', help='verify signed message')
+    p.set_defaults(handler=handle_verify)
+    p.add_argument('json', metavar='JSON', help='json encoded information for verify')
 
     p_wallet = sp_root.add_parser('wallet', help='Wallet commands.')
     sp_wallet = p_wallet.add_subparsers(help='Choose wallet sub-command to execute')

@@ -167,6 +167,15 @@ def recover_from_blocks(blocks, hdpass):
 def recover_from_storage(store, hdpass):
     return recover_from_blocks(store.blocks_rev(), hdpass)
 
+def verify_address(addr, xpub):
+    'verify address with pubkey'
+    addr_hash, attrs, addr_type = decode_addr(addr)
+    if addr_type != 0:
+        return False
+    if encode_addr([addr_type, [0, xpub], attrs]) != addr:
+        return False
+    return True
+
 def test_encode_address(words, passphase):
     root_xpriv = gen_root_xpriv(mnemonic_to_seed(words), passphase)
     addr = root_addr(xpriv_to_xpub(root_xpriv))
