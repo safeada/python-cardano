@@ -41,7 +41,7 @@ def sync(store, node, addr, genesis, genesis_prev):
         if local_tip == network_tip:
             break
 
-        hdrs = list(headers_worker([local_tip], network_tip))
+        hdrs = headers_worker([local_tip], network_tip)
         blocks = node.worker(Message.GetBlocks, addr)(hdrs[-1].hash(), hdrs[0].hash())
         for blk in blocks:
             hdr = blk.header()

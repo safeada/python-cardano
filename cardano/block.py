@@ -49,6 +49,9 @@ class DecodedBlockHeader(DecodedBase):
     def is_genesis(self):
         return self.data[0] == 0
 
+    def difficulty(self):
+        _, difficulty = self.data[1][3][2]
+        return difficulty
 
 class DecodedTransaction(DecodedBase):
     def tx(self):
