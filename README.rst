@@ -32,15 +32,18 @@ Build & Test
     $ python setup.py build_ext --inplace
 
     $ mkdir ./test_db
-    $ python -mcardano.sync ./test_db
+    $ python scripts/pycardano.py sync
     sync block data from mainnet...
-    $ python -mcardano.address ./test_db
-    recovering test wallet from local block data...
+    $ python scripts/pycardano.py wallet create default
+    generate wallet
 
-Unique Features
----------------
+Features
+--------
 
 * Store block data of different epochs in seperate rocksdb database, provides better disk usage(fully synchronized mainchain takes 1.3G disk space), and allows faster synchronization in the future.
+* ``pycardano.py sign`` sign a message with wallet, prove an wallet address belongs to you.
+* ``pycardano.py verify`` verify a signed message.
+* ``pycardano.py utxo stat`` Some statistics of global UTxOs.
 
 Modules
 -------
@@ -57,13 +60,17 @@ Modules
 
   Implement cardano-sl's ``Node``, allow bidirectional conversation between endpoints.
 
+* ``cardano.storage``
+
+  Storage api of block and wallet's data.
+
 * ``cardano.block``
 
   Block data structures.
 
-* ``cardano.storage``
+* ``cardano.logic``
 
-  Storage api of block and wallet's data.
+  Workers and listeners of default node.
 
 * ``cardano.sync``
 
@@ -76,6 +83,10 @@ Modules
 TODOs
 -----
 
-* BIP44 wallet.
-* Wallet state storage, a simple solution first, hopefully something like Haskell's acid-state in the end.
-* Support listeners in ``cardano.node``, then implement block serving listeners, then a fully functional relay node.
+* wallet state storage, a simple solution first, hopefully something like Haskell's acid-state in the end.
+* block verification.
+* handle incoming block headers, handle forks.
+* relay block data with stream api.
+* wallet cli app.
+* wallet V1 api and api for SPV light client.
+* clustered wallet storage.

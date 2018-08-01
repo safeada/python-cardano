@@ -5,13 +5,23 @@ import json
 from collections import defaultdict
 import argparse
 import itertools
+import getpass
 
 import base58
 import rocksdb
+import mnemonic
+
+from cardano.transport import Transport
 from cardano.storage import Storage, iter_prefix, remove_prefix
+from cardano.node import default_node, Message
+from cardano.sync import sync
+from cardano.address import (
+    derive_hdpassphase, xpriv_to_xpub, get_derive_path, DERIVATION_V1,
+    derive_key, verify_address, mnemonic_to_seed, gen_root_xpriv
+)
+from cardano.cbits import encrypted_sign, verify
 
 def input_passphase():
-    import getpass
     passphase = None
     while not passphase:
         passphase = getpass.getpass('Input passphase:').encode()
@@ -25,10 +35,7 @@ def load_wallet_config(args):
     return json.load(open(cfg_path))
 
 def handle_sync(args):
-    from cardano.sync import sync
-    from cardano.node import Transport, default_node
-
-    store = Storage(args.db)
+    store = Storage(args.root)
     node = default_node(Transport().endpoint())
     try:
         sync(store, node, args.addr.encode(), args.genesis, args.genesis_prev)
@@ -39,16 +46,11 @@ def handle_sync(args):
         gc.collect()
 
 def handle_run(args):
-    from cardano.transport import Transport
-    from cardano.node import default_node, Message
-
     transport = Transport()
     node = default_node(transport.endpoint())
     node.worker(Message.Subscribe, b'relays.cardano-mainnet.iohk.io:3000:0')()
 
 def handle_sign(args):
-    from cardano.address import derive_hdpassphase, xpriv_to_xpub, get_derive_path, derive_key, DERIVATION_V1, verify_address
-    from cardano.cbits import encrypted_sign
     passphase = input_passphase()
     cfg = load_wallet_config(args)
     root_xpriv = binascii.unhexlify(cfg['root_key'])
@@ -73,9 +75,6 @@ def handle_sign(args):
     }))
 
 def handle_verify(args):
-    from cardano.address import verify_address
-    from cardano.cbits import verify
-
     data = json.loads(args.json)
     addr = base58.b58decode(data['addr'])
     xpub = binascii.unhexlify(data['xpub'])
@@ -93,7 +92,7 @@ def handle_verify(args):
     print('signature is right' if result else 'signature is wrong')
 
 def handle_recache_utxo(args):
-    store = Storage(args.db)
+    store = Storage(args.root)
     print('Removing all cached utxo')
     remove_prefix(store.db, b'ut/t/')
     print('Iterating blocks')
@@ -106,7 +105,7 @@ def handle_recache_utxo(args):
         print('%d' % count, end='\r')
 
 def handle_stat_utxo(args):
-    store = Storage(args.db)
+    store = Storage(args.root)
     total_coin = 0
     balances = defaultdict(int)
     print('Start iterating utxos')
@@ -120,8 +119,6 @@ def handle_stat_utxo(args):
         print(' ', base58.b58encode(addr).decode(), c / (10**6))
 
 def create_wallet_with_mnemonic(args, words, recover):
-    from cardano.address import mnemonic_to_seed, gen_root_xpriv
-
     wallets_root = os.path.join(args.root, 'wallets')
     if not os.path.exists(wallets_root):
         os.mkdir(wallets_root)
@@ -142,8 +139,7 @@ def create_wallet_with_mnemonic(args, words, recover):
     open(cfg_path, 'w').write(s)
 
 def handle_wallet_create(args):
-    from mnemonic import Mnemonic
-    words = Mnemonic(args.language).generate()
+    words = mnemonic.Mnemonic(args.language).generate()
     return create_wallet_with_mnemonic(args, words, False)
 
 def handle_wallet_recover(args):
@@ -152,7 +148,6 @@ def handle_wallet_recover(args):
 def handle_wallet_balance(args):
     cfg = load_wallet_config(args)
     root_key = binascii.unhexlify(cfg['root_key'])
-    from cardano.address import derive_hdpassphase, xpriv_to_xpub, get_derive_path
     hdpass = derive_hdpassphase(xpriv_to_xpub(root_key))
 
     # iterate utxo.
@@ -180,11 +175,11 @@ def handle_wallet_list(args):
 
 def cli_parser():
     p_root = argparse.ArgumentParser(description='Python cardano cli.')
-    p_root.add_argument('--root', dest='root', default='./test_db', help='root directory for storage.')
     sp_root = p_root.add_subparsers(help='choose sub-command to execute')
 
     p_sync = sp_root.add_parser('sync', help='Fill local database by syncing blocks from cardano mainchain.')
     p_sync.set_defaults(handler=handle_sync)
+    p_sync.add_argument('--root', dest='root', default='./test_db', help='root directory for storage.')
     p_sync.add_argument('--addr',
         dest='addr',
         default='relays.cardano-mainnet.iohk.io:3000:0',
@@ -202,13 +197,16 @@ def cli_parser():
     )
 
     p_run = sp_root.add_parser('run', help='Run main node, sync and subscribe for new block automatically.')
+    p_run.add_argument('--root', dest='root', default='./test_db', help='root directory for storage.')
     p_run.set_defaults(handler=handle_run)
 
     p_utxo = sp_root.add_parser('utxo', help='UTxO commands.')
     sp_utxo = p_utxo.add_subparsers(help='Choose wallet sub-command to execute')
     p = sp_utxo.add_parser('re-cache', help='Re-create UTxO cache, with block data in local storage.')
+    p.add_argument('--root', dest='root', default='./test_db', help='root directory for storage.')
     p.set_defaults(handler=handle_recache_utxo)
     p = sp_utxo.add_parser('stat', help='View statistics of current UTxO cache.')
+    p.add_argument('--root', dest='root', default='./test_db', help='root directory for storage.')
     p.set_defaults(handler=handle_stat_utxo)
 
     p = sp_root.add_parser('sign', help='sign message with your secret key')
@@ -238,6 +236,7 @@ def cli_parser():
         metavar = 'NAME',
         help = 'the name of the new wallet',
     )
+    p.add_argument('--root', dest='root', default='./test_db', help='root directory for storage.')
     p.add_argument('--language',
         dest = 'language',
         default = 'english',
@@ -246,6 +245,7 @@ def cli_parser():
 
     p = sp_wallet.add_parser('recover', help='recover wallet with mnemonic words')
     p.set_defaults(handler=handle_wallet_recover)
+    p.add_argument('--root', dest='root', default='./test_db', help='root directory for storage.')
     p.add_argument('name',
         metavar = 'NAME',
         help = 'the name of the new wallet',
@@ -263,12 +263,14 @@ def cli_parser():
 
     p = sp_wallet.add_parser('balance', help='get wallet balance')
     p.set_defaults(handler=handle_wallet_balance)
+    p.add_argument('--root', dest='root', default='./test_db', help='root directory for storage.')
     p.add_argument('name',
         metavar = 'NAME',
         help = 'the name of the wallet',
     )
 
     p = sp_wallet.add_parser('list', help='list wallets')
+    p.add_argument('--root', dest='root', default='./test_db', help='root directory for storage.')
     p.set_defaults(handler=handle_wallet_list)
     return p_root
 
