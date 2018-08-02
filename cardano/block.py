@@ -14,19 +14,20 @@ import cbor
 from .utils import hash_serialized, hash_data
 
 class DecodedBase(object):
-    def __init__(self, data, raw=None):
+    def __init__(self, data, raw=None, hash=None):
         self.data = data
         self._raw = raw
+        self._hash = hash
 
-    @staticmethod
-    def from_raw(self, raw):
-        return DecodedBlockHeader(cbor.loads(raw), raw)
+    @classmethod
+    def from_raw(cls, raw, hash=None):
+        return cls(cbor.loads(raw), raw, hash)
 
     def raw(self):
         return self._raw or cbor.dumps(self.data)
 
     def hash(self):
-        return hash_serialized(self.raw())
+        return self._hash or hash_serialized(self.raw())
 
 
 class DecodedBlockHeader(DecodedBase):
@@ -50,8 +51,8 @@ class DecodedBlockHeader(DecodedBase):
         return self.data[0] == 0
 
     def difficulty(self):
-        _, difficulty = self.data[1][3][2]
-        return difficulty
+        n, = self.data[1][3][2]
+        return n
 
 class DecodedTransaction(DecodedBase):
     def tx(self):

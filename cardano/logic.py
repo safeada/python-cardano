@@ -7,8 +7,9 @@ import gevent
 import cbor
 
 from .block import DecodedBlockHeader, DecodedBlock
-from .node import Worker, Message
+from .node import Node, Worker, Message
 from .utils import get_current_slot
+from .config import SLOT_DURATION
 
 # Workers
 class GetHeaders(Worker):
@@ -71,8 +72,10 @@ class Subscribe(Worker):
     def __call__(self):
         # instance Bi MsgSubscribe
         self.conv.send(cbor.dumps(42))
+
+    def keepalive(self):
         while True:
-            gevent.sleep(20)
+            gevent.sleep(SLOT_DURATION)
             # keep alive
             self.conv.send(cbor.dumps(43))
 
@@ -90,7 +93,8 @@ workers = [
     Subscribe,
     Subscribe1,
 ]
-# listeners
+
+# Listeners
 def handle_get_headers(node, conv):
     'Peer wants some block headers from us.'
     while True:
@@ -111,28 +115,6 @@ def handle_stream_start(node, conv):
     'Peer wants to stream some blocks from us.'
     pass
 
-def classify_new_header(tip_header, hdr):
-    current_slot = get_current_slot()
-    hdr_slot = hdr.slot()
-    if hdr_slot[1] == None:
-        # genesis block
-        print('new header is genesis block')
-        return # useless
-    if hdr_slot > current_slot:
-        print('new header is for future slot')
-        return # future slot
-    if hdr_slot <= tip_header:
-        print('new header slot smaller then tip')
-
-    if hdr_slot.prev_header() == tip_header.hash():
-        # TODO verify
-        return True # means is's a continue.
-    else:
-        # check difficulty
-        if hdr_slot.difficulty() > tip_header.difficulty():
-            # longer alternative chain.
-            return False
-
 def handle_headers(node, conv):
     'Peer has a block header for us (yes, singular only).'
     data = conv.receive()
@@ -141,13 +123,14 @@ def handle_headers(node, conv):
         return
     tag, headers = cbor.loads(data)
     assert tag==0 and len(headers) == 1, 'invalid header message'
-    hdr = DecodedBlockHeader(headers[0])
-    print('got block header', binascii.hexlify(hdr.hash()))
+    header = DecodedBlockHeader(headers[0])
+    print('got block header', binascii.hexlify(header.hash()))
 
-    # need to send to block retrieve logic.
-    #store = node.resource.storage
-    #tip_header = store.blockheader(store.tip())
-    #classify_new_header(tip_header, hdr)
+    if not getattr(node, 'retriever', None):
+        # it's just a demo node.
+        return
+
+    node.retriever.add_retrieval_task(conv.addr, header)
 
 listeners = {
     Message.GetHeaders: handle_get_headers,
@@ -156,55 +139,23 @@ listeners = {
     Message.Headers: handle_headers,
 }
 
-# tests
-def poll_tip(addr):
-    node = default_node(Transport().endpoint())
-    headers_client = node.worker(Message.GetHeaders, addr)
-    current = None
-    while True:
-        # get tip
-        tip = headers_client([], None)[0]
-        h = tip.hash()
-        if h != current:
-            for b in node.worker(Message.GetBlocks, addr)(current or h, h):
-                hdr = b.header()
-                h = hdr.hash()
-                if h == current:
-                    continue
-                print('new block', hdr.slot())
-                txs = b.transactions()
-                if txs:
-                    print('transactions:')
-                    for tx in txs:
-                        print(binascii.hexlify(tx.hash()).decode())
-                else:
-                    print('no transactions')
-            current = h
+class LogicNode(Node):
+    def __init__(self, ep, store):
+        super(LogicNode, self).__init__(ep, workers, listeners)
+        self.store = store
 
-        gevent.sleep(20)
+        # start worker threads
+        from .retrieve import BlockRetriever
+        self.retriever = BlockRetriever(self.store, self)
+        self.retriever_thread = gevent.spawn(self.retriever)
 
-def get_all_headers(addr, genesis):
-    node = Node(Transport().endpoint())
-
-    headers_client = node.client(addr, GetHeaders)
-    tip = headers_client([], None)[0]
-
-    current = None
-    print('tip', binascii.hexlify(tip.hash()), binascii.hexlify(tip.prev_header()))
-    headers = headers_client([genesis], tip.hash())
-    print('validate headers')
-    for hdr in headers:
-        print(binascii.hexlify(hdr.hash()), binascii.hexlify(hdr.prev_header()))
-        if current:
-            assert hdr.hash() == current, 'invalid chain'
-            current = hdr.prev_header()
-    assert current == genesis
-
-def test_stream_block(addr, genesis):
-    node = Node(Transport().endpoint())
-    tip = node.client(addr, GetHeaders)([], None)[0]
-    client = node.client(addr, StreamBlocks)
-    assert client, 'Peer don\'t support stream blocks.'
-    for blk in client.start([genesis], tip.hash(), 10):
-        print(blk.header().slot())
-
+if __name__ == '__main__':
+    from .transport import Transport
+    from .storage import Storage
+    from .config import MAINCHAIN_ADDR
+    print('connecting')
+    node = LogicNode(Transport().endpoint(), Storage('./test_db'))
+    w = node.worker(Message.Subscribe, MAINCHAIN_ADDR)
+    print('subscribe')
+    w()
+    w.keepalive()

@@ -68,7 +68,7 @@ class Storage(object):
     def blockheader(self, hash):
         buf = self.db.get(b'b/'+hash)
         if buf:
-            return DecodedBlockHeader(cbor.loads(buf), buf)
+            return DecodedBlockHeader.from_raw(buf, hash)
 
     def block(self, hdr):
         db = self.open_epoch_db(hdr.slot()[0], readonly=True)

@@ -2,7 +2,7 @@ import hashlib
 import time
 import cbor
 
-from .constants import SECURITY_PARAMETER_K, START_TIME, SLOT_DURATION
+from .config import SECURITY_PARAMETER_K, START_TIME, SLOT_DURATION
 
 def hash_serialized(s):
     return hashlib.blake2b(s, digest_size=32).digest()

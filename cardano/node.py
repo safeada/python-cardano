@@ -43,9 +43,10 @@ def make_peer_data(workers, listeners):
 
 class Conversation(object):
     'Bidirectional connection.'
-    def __init__(self, conn, queue, peer_data):
+    def __init__(self, conn, queue, addr, peer_data):
         self._conn = conn    # sending side.
         self._queue = queue  # receive message.
+        self._addr = addr    # remote address.
         self._peer_data = peer_data
 
     def __gc__(self):
@@ -54,6 +55,10 @@ class Conversation(object):
     @property
     def peer_data(self):
         return self._peer_data
+
+    @property
+    def addr(self):
+        return self._addr
 
     def send(self, data):
         self._conn.send(data)
@@ -148,7 +153,7 @@ class Node(object):
             self._wait_for_queue.pop((nonce, addr))
             conn.close()
             raise
-        return Conversation(conn, queue, self._peer_received[addr])
+        return Conversation(conn, queue, addr, self._peer_received[addr])
 
     def dispatcher(self):
         ep = self._endpoint
@@ -197,11 +202,14 @@ class Node(object):
         # Will use the exist tcp connection.
         conn = self._connect_peer(addr)
         conn.send(b'A' + struct.pack('>Q', nonce))
-        conv = Conversation(conn, queue, self._peer_received[addr])
+        conv = Conversation(conn, queue, addr, self._peer_received[addr])
 
         # run listener.
         try:
-            msgcode = cbor.loads(queue.get())
+            result = queue.get()
+            if not isinstance(result, bytes):
+                print('invalid message', result)
+            msgcode = cbor.loads(result)
             self._listeners[msgcode](self, conv)
         finally:
             conv.close()
@@ -211,7 +219,7 @@ class Node(object):
         assert cls.message_type == msgtype
         conv = self.connect(addr)
         if msgtype not in conv.peer_data[2]:
-            print('Remote peer don\'t support this message type.')
+            #print('Remote peer don\'t support this message type.')
             return
 
         conv.send(cbor.dumps(msgtype))
@@ -230,6 +238,10 @@ def default_node(ep):
 
 if __name__ == '__main__':
     from .transport import Transport
-    addr = b'relays.cardano-mainnet.iohk.io:3000:0'
+    from .config import MAINCHAIN_ADDR
     node = default_node(Transport().endpoint())
-    node.worker(Message.Subscribe, addr)()
+    worker = node.worker(Message.Subscribe, MAINCHAIN_ADDR)
+    # send subscribe
+    worker()
+    # keepalive loop
+    worker.keepalive()

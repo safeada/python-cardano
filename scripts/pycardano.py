@@ -20,6 +20,7 @@ from cardano.address import (
     derive_key, verify_address, mnemonic_to_seed, gen_root_xpriv
 )
 from cardano.cbits import encrypted_sign, verify
+from cardano.config import MAINCHAIN_ADDR
 
 def input_passphase():
     passphase = None
@@ -182,18 +183,8 @@ def cli_parser():
     p_sync.add_argument('--root', dest='root', default='./test_db', help='root directory for storage.')
     p_sync.add_argument('--addr',
         dest='addr',
-        default='relays.cardano-mainnet.iohk.io:3000:0',
+        default=MAINCHAIN_ADDR.decode(),
         help='Address of node to connect.'
-    )
-    p_sync.add_argument('--genesis',
-        dest='genesis',
-        default='89d9b5a5b8ddc8d7e5a6795e9774d97faf1efea59b2caf7eaf9f8c5b32059df4',
-        help='hash of genesis block'
-    )
-    p_sync.add_argument('--genesis-prev',
-        dest='genesis_prev',
-        default='5f20df933584822601f9e3f8c024eb5eb252fe8cefb24d1317dc3d432e940ebb',
-        help='hash of prev of genesis block'
     )
 
     p_run = sp_root.add_parser('run', help='Run main node, sync and subscribe for new block automatically.')

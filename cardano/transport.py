@@ -504,10 +504,11 @@ class Transport(object):
             break
 
 if __name__ == '__main__':
+    from .config import MAINCHAIN_ADDR
     ep = Transport().endpoint() # Unaddressable transport.
     #ep = Transport(('127.0.0.1', 3000)).endpoint()
     print('connect')
-    conn = ep.connect(b'relays.cardano-mainnet.iohk.io:3000:0')
+    conn = ep.connect(MAINCHAIN_ADDR)
 
     # cardano node handshake.
     # send peer data.
