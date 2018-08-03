@@ -13,14 +13,14 @@ import mnemonic
 
 from cardano.transport import Transport
 from cardano.storage import Storage, iter_prefix, remove_prefix
-from cardano.node import default_node, Message
-from cardano.sync import sync
+from cardano.node import Message
+from cardano.logic import LogicNode
 from cardano.address import (
     derive_hdpassphase, xpriv_to_xpub, get_derive_path, DERIVATION_V1,
     derive_key, verify_address, mnemonic_to_seed, gen_root_xpriv
 )
 from cardano.cbits import encrypted_sign, verify
-from cardano.config import MAINCHAIN_ADDR
+from cardano import config
 
 def input_passphase():
     passphase = None
@@ -35,21 +35,11 @@ def load_wallet_config(args):
         return
     return json.load(open(cfg_path))
 
-def handle_sync(args):
-    store = Storage(args.root)
-    node = default_node(Transport().endpoint())
-    try:
-        sync(store, node, args.addr.encode(), args.genesis, args.genesis_prev)
-    finally:
-        # close database properly.
-        store = None
-        import gc
-        gc.collect()
-
 def handle_run(args):
+    store = Storage(args.root)
     transport = Transport()
-    node = default_node(transport.endpoint())
-    node.worker(Message.Subscribe, b'relays.cardano-mainnet.iohk.io:3000:0')()
+    node = LogicNode(transport.endpoint(), store)
+    node.run()
 
 def handle_sign(args):
     passphase = input_passphase()
@@ -178,18 +168,14 @@ def cli_parser():
     p_root = argparse.ArgumentParser(description='Python cardano cli.')
     sp_root = p_root.add_subparsers(help='choose sub-command to execute')
 
-    p_sync = sp_root.add_parser('sync', help='Fill local database by syncing blocks from cardano mainchain.')
-    p_sync.set_defaults(handler=handle_sync)
-    p_sync.add_argument('--root', dest='root', default='./test_db', help='root directory for storage.')
-    p_sync.add_argument('--addr',
-        dest='addr',
-        default=MAINCHAIN_ADDR.decode(),
-        help='Address of node to connect.'
-    )
-
     p_run = sp_root.add_parser('run', help='Run main node, sync and subscribe for new block automatically.')
     p_run.add_argument('--root', dest='root', default='./test_db', help='root directory for storage.')
     p_run.set_defaults(handler=handle_run)
+    p_run.add_argument('--addr',
+        dest='addr',
+        default=config.MAINCHAIN_ADDR.decode(),
+        help='Address of node to connect.'
+    )
 
     p_utxo = sp_root.add_parser('utxo', help='UTxO commands.')
     sp_utxo = p_utxo.add_subparsers(help='Choose wallet sub-command to execute')

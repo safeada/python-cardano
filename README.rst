@@ -32,8 +32,8 @@ Build & Test
     $ python setup.py build_ext --inplace
 
     $ mkdir ./test_db
-    $ python scripts/pycardano.py sync
-    sync block data from mainnet...
+    $ python scripts/pycardano.py run
+    sync block data from mainnet and subscribing for new blocks automatically.
     $ python scripts/pycardano.py wallet create default
     generate wallet
 
@@ -72,9 +72,9 @@ Modules
 
   Workers and listeners of default node.
 
-* ``cardano.sync``
+* ``cardano.retrieve``
 
-  Download block data with cardano-sl mainnet.
+  Retrieve block data with cardano-sl mainnet.
 
 * ``cardano.wallet``
 

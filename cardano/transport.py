@@ -55,6 +55,7 @@ def random_endpoint_address():
 
 def endpoint_connect(addr, local_addr):
     host, port, id = addr.rsplit(b':', 2)
+    print('create heavyweight connection to %s:%s' % (host.decode(), port.decode()))
     id = int(id)
     try:
         sock = gevent.socket.create_connection((host, port))
@@ -504,11 +505,11 @@ class Transport(object):
             break
 
 if __name__ == '__main__':
-    from .config import MAINCHAIN_ADDR
+    from . import config
     ep = Transport().endpoint() # Unaddressable transport.
     #ep = Transport(('127.0.0.1', 3000)).endpoint()
     print('connect')
-    conn = ep.connect(MAINCHAIN_ADDR)
+    conn = ep.connect(config.MAINCHAIN_ADDR)
 
     # cardano node handshake.
     # send peer data.

@@ -71,13 +71,19 @@ class BlockRetriever(object):
         self.event.set()
 
     def add_retrieval_task(self, addr, header):
-        print('retrieve', header.difficulty())
+        print('add retrieval task', header.difficulty())
         # update last known header
         self.queue.put((addr, header))
         self.event.set()
 
     def recovering(self):
         return bool(self.recovery)
+
+    def trigger_recovery(self, addr):
+        'trigger recovery actively by requesting tip'
+        print('recovery triggered.')
+        w = self.node.worker(Message.GetHeaders, addr)
+        self.add_retrieval_task(addr, w.tip())
 
     def _handle_recovery_task(self, addr, header):
         tip_header = self.store.blockheader(self.store.tip())
@@ -89,7 +95,6 @@ class BlockRetriever(object):
         result = classify_new_header(tip_header, header)
         if result == True:
             # continuation, get a single block.
-            print('continuation')
             self._single_block(addr, header.hash())
         elif result == False:
             # alternative, enter recovery mode.
@@ -108,9 +113,10 @@ class BlockRetriever(object):
 
     def _batch_blocks(self, addr, checkpoints, head):
         # TODO classify headers
+        print('request batch blocks')
         w_headers = self.node.worker(Message.GetHeaders, addr)
         headers = w_headers(checkpoints, head)
-        print('headers', len(headers))
+        print('got headers', len(headers))
         if not headers:
             return
         w_blocks = self.node.worker(Message.GetBlocks, addr)
@@ -128,6 +134,7 @@ class BlockRetriever(object):
             self._batch_blocks(addr, checkpoints, head)
 
     def _single_block(self, addr, h):
+        print('request single block')
         w = self.node.worker(Message.GetBlocks, addr)
         blk = next(w(h, h))
         self._handle_blocks([blk])

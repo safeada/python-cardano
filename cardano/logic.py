@@ -2,14 +2,15 @@
 Logic includes workers and listeners.
 '''
 import binascii
+import random
 
 import gevent
 import cbor
 
 from .block import DecodedBlockHeader, DecodedBlock
 from .node import Node, Worker, Message
-from .utils import get_current_slot
-from .config import SLOT_DURATION
+from .utils import get_current_slot, flatten_slotid
+from . import config
 
 # Workers
 class GetHeaders(Worker):
@@ -21,6 +22,9 @@ class GetHeaders(Worker):
         if tag == 1: # NoHeaders
             return []
         return [DecodedBlockHeader(item) for item in data]
+
+    def tip(self):
+        return self([], None)[0]
 
 class GetBlocks(Worker):
     message_type = Message.GetBlocks
@@ -75,7 +79,7 @@ class Subscribe(Worker):
 
     def keepalive(self):
         while True:
-            gevent.sleep(SLOT_DURATION)
+            gevent.sleep(config.SLOT_DURATION)
             # keep alive
             self.conv.send(cbor.dumps(43))
 
@@ -124,7 +128,7 @@ def handle_headers(node, conv):
     tag, headers = cbor.loads(data)
     assert tag==0 and len(headers) == 1, 'invalid header message'
     header = DecodedBlockHeader(headers[0])
-    print('got block header', binascii.hexlify(header.hash()))
+    print('got new block header', binascii.hexlify(header.hash()).decode())
 
     if not getattr(node, 'retriever', None):
         # it's just a demo node.
@@ -145,17 +149,50 @@ class LogicNode(Node):
         self.store = store
 
         # start worker threads
+
+        # block retriever
         from .retrieve import BlockRetriever
         self.retriever = BlockRetriever(self.store, self)
         self.retriever_thread = gevent.spawn(self.retriever)
 
+        # recover trigger
+        self.trigger_recovery_thread = gevent.spawn(self._trigger_recovery_worker, config.SECURITY_PARAMETER_K * 2)
+
+        # dns subscribe worker
+        self.subscribe_thread = gevent.spawn(self._subscribe)
+
+    def _trigger_recovery_worker(self, lag_behind):
+        while True:
+            triggered = False
+            if not self.retriever.recovering():
+                cur_slot = get_current_slot()
+                tip_slot = self.store.blockheader(self.store.tip()).slot()
+                slot_diff = flatten_slotid(cur_slot) - flatten_slotid(tip_slot)
+                if slot_diff >= lag_behind:
+                    # need to recovery.
+                    self.retriever.trigger_recovery(config.MAINCHAIN_ADDR)
+                    triggered = True
+                elif slot_diff < 0:
+                    print('tip slot is in future.')
+
+            if not triggered:
+                # random
+                if random.random() < 0.004 and slot_diff >= 5:
+                    self.retriever.trigger_recovery(config.MAINCHAIN_ADDR)
+                    triggered = True
+
+            gevent.sleep(20 if triggered else 1)
+
+    def _subscribe(self):
+        w = self.worker(Message.Subscribe, config.MAINCHAIN_ADDR)
+        w()
+        w.keepalive()
+
+    def run(self):
+        self.subscribe_thread.join()
+
 if __name__ == '__main__':
     from .transport import Transport
     from .storage import Storage
-    from .config import MAINCHAIN_ADDR
-    print('connecting')
     node = LogicNode(Transport().endpoint(), Storage('./test_db'))
-    w = node.worker(Message.Subscribe, MAINCHAIN_ADDR)
-    print('subscribe')
-    w()
-    w.keepalive()
+    node.run()

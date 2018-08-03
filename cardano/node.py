@@ -127,6 +127,7 @@ class Node(object):
             pass # already done.
         elif st == None:
             # transmit and notify pending connections.
+            print('sending our peer data')
             evt = gevent.event.Event()
             self._peer_sending[addr] = evt
             conn.send(cbor.dumps(self._peer_data, sort_keys=True))
@@ -167,6 +168,7 @@ class Node(object):
                 addr = self._incoming_addr[ev.connid]
                 if addr not in self._peer_received:
                     # not received peerdata yet, assuming this is it.
+                    print('received remote peer data')
                     self._peer_received[addr] = cbor.loads(ev.data)
                     continue
 
@@ -238,9 +240,9 @@ def default_node(ep):
 
 if __name__ == '__main__':
     from .transport import Transport
-    from .config import MAINCHAIN_ADDR
+    from . import config
     node = default_node(Transport().endpoint())
-    worker = node.worker(Message.Subscribe, MAINCHAIN_ADDR)
+    worker = node.worker(Message.Subscribe, config.MAINCHAIN_ADDR)
     # send subscribe
     worker()
     # keepalive loop

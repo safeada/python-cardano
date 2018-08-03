@@ -2,7 +2,7 @@ import hashlib
 import time
 import cbor
 
-from .config import SECURITY_PARAMETER_K, START_TIME, SLOT_DURATION
+from . import config
 
 def hash_serialized(s):
     return hashlib.blake2b(s, digest_size=32).digest()
@@ -12,11 +12,11 @@ def hash_data(v):
 
 def flatten_slotid(slot):
     epoch, idx = slot
-    return epoch * SECURITY_PARAMETER_K * 10 + (idx or 0)
+    return epoch * config.SECURITY_PARAMETER_K * 10 + (idx or 0)
 
 def unflatten_slotid(n):
-    return divmod(n, SECURITY_PARAMETER_K * 10)
+    return divmod(n, config.SECURITY_PARAMETER_K * 10)
 
 def get_current_slot():
-    n = (int(time.time()) - START_TIME) // SLOT_DURATION
+    n = (int(time.time()) - config.START_TIME) // config.SLOT_DURATION
     return unflatten_slotid(n)
