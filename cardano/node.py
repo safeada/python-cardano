@@ -103,7 +103,7 @@ class Node(object):
         # All incoming message queues, connid -> Queue
         self._incoming_queues = {}
 
-        # Sending side wait for message queue, (nonce, addr) -> AsyncResult
+        # Connector wait for message receive queue, (nonce, addr) -> AsyncResult
         self._wait_for_queue = {}
 
         self._next_nonce = random.randint(0, sys.maxsize)
@@ -209,10 +209,9 @@ class Node(object):
         # run listener.
         try:
             result = queue.get()
-            if not isinstance(result, bytes):
-                print('invalid message', result)
-            msgcode = cbor.loads(result)
-            self._listeners[msgcode](self, conv)
+            if result != StopIteration:
+                msgcode = cbor.loads(result)
+                self._listeners[msgcode](self, conv)
         finally:
             conv.close()
 

@@ -10,6 +10,7 @@ import getpass
 import base58
 import rocksdb
 import mnemonic
+import gevent
 
 from cardano.transport import Transport
 from cardano.storage import Storage, iter_prefix, remove_prefix
@@ -36,10 +37,20 @@ def load_wallet_config(args):
     return json.load(open(cfg_path))
 
 def handle_run(args):
+    if args.addr:
+        config.MAINCHAIN_ADDR = args.addr.encode()
+
     store = Storage(args.root)
     transport = Transport()
     node = LogicNode(transport.endpoint(), store)
-    node.run()
+    if args.backdoor:
+        from gevent.backdoor import BackdoorServer
+        BackdoorServer(
+            ('127.0.0.1', args.backdoor),
+            banner = "Hello from gevent backdoor!",
+            locals = {'node': node}
+        ).start()
+    gevent.wait()
 
 def handle_sign(args):
     passphase = input_passphase()
@@ -173,8 +184,12 @@ def cli_parser():
     p_run.set_defaults(handler=handle_run)
     p_run.add_argument('--addr',
         dest='addr',
-        default=config.MAINCHAIN_ADDR.decode(),
         help='Address of node to connect.'
+    )
+    p_run.add_argument('--backdoor',
+        dest='backdoor',
+        type=int,
+        help='Port of backdoor server, when not specified, don\'t start backdoor server.'
     )
 
     p_utxo = sp_root.add_parser('utxo', help='UTxO commands.')

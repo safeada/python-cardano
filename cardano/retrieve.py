@@ -19,7 +19,7 @@ def classify_new_header(tip_header, header):
         print('new header is for future slot')
         return # future slot
     if hdr_slot <= tip_header.slot():
-        print('new header slot smaller then tip')
+        print('new header slot not advanced than tip')
         return
 
     if header.prev_header() == tip_header.hash():
@@ -39,9 +39,11 @@ class BlockRetriever(object):
         # retrieval task queue
         self.queue = gevent.queue.Queue(16)
         # recovery signal
-        self.recovery = None
+        self._recovery = None
 
         self.event = gevent.event.Event()
+
+        self.last_known_header = None
 
     def __call__(self):
         while True:
@@ -52,38 +54,45 @@ class BlockRetriever(object):
                 addr, header = self.queue.get(False)
                 self._handle_retrieval_task(addr, header)
 
-            if self.recovery:
-                self._handle_recovery_task(*self.recovery)
-
-    def set_recovery_task(self, addr, header):
-        if self.recovery:
-            _, old_hdr = self.recovery
-            if header.difficulty() <= old_hdr.difficulty():
-                # no need to update
-                return
-
-        if not self.recovery:
-            print('start recovery', header.difficulty())
-        else:
-            print('update recovery target', header.difficulty())
-
-        self.recovery = (addr, header)
-        self.event.set()
+            if self._recovery:
+                self._handle_recovery_task(*self._recovery)
 
     def add_retrieval_task(self, addr, header):
         print('add retrieval task', header.difficulty())
-        # update last known header
+        self._update_last_known_header(header)
         self.queue.put((addr, header))
         self.event.set()
 
     def recovering(self):
-        return bool(self.recovery)
+        return bool(self._recovery)
 
     def trigger_recovery(self, addr):
         'trigger recovery actively by requesting tip'
         print('recovery triggered.')
         w = self.node.worker(Message.GetHeaders, addr)
         self.add_retrieval_task(addr, w.tip())
+
+    def status(self):
+        'syncing: return sync progress; not syncing: return None'
+        if self._recovery:
+            local = self.store.blockheader(self.store.tip()).difficulty()
+            net = self.last_known_header.difficulty()
+            return local / net
+
+    def _set_recovery_task(self, addr, header):
+        if self._recovery:
+            _, old_hdr = self._recovery
+            if header.difficulty() <= old_hdr.difficulty():
+                # no need to update
+                return
+
+        if not self._recovery:
+            print('start recovery', header.difficulty())
+        else:
+            print('update recovery target', header.difficulty())
+
+        self._recovery = (addr, header)
+        self.event.set()
 
     def _handle_recovery_task(self, addr, header):
         tip_header = self.store.blockheader(self.store.tip())
@@ -98,15 +107,15 @@ class BlockRetriever(object):
             self._single_block(addr, header.hash())
         elif result == False:
             # alternative, enter recovery mode.
-            self.set_recovery_task(addr, header)
+            self._set_recovery_task(addr, header)
 
     def _handle_blocks(self, blocks):
-        if self.recovery:
-            _, header = self.recovery
+        if self._recovery:
+            _, header = self._recovery
             target_difficulty = header.difficulty()
             if any(blk.header().difficulty() >= target_difficulty for blk in blocks):
                 print('exit recovering')
-                self.recovery = None
+                self._recovery = None
 
         for blk in blocks:
             self.store.append_block(blk)
@@ -138,3 +147,8 @@ class BlockRetriever(object):
         w = self.node.worker(Message.GetBlocks, addr)
         blk = next(w(h, h))
         self._handle_blocks([blk])
+
+    def _update_last_known_header(self, header):
+        # update last known header
+        if not self.last_known_header or header.difficulty() > self.last_known_header.difficulty():
+            self.last_known_header = header

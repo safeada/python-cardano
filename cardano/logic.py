@@ -188,11 +188,8 @@ class LogicNode(Node):
         w()
         w.keepalive()
 
-    def run(self):
-        self.subscribe_thread.join()
-
 if __name__ == '__main__':
     from .transport import Transport
     from .storage import Storage
     node = LogicNode(Transport().endpoint(), Storage('./test_db'))
-    node.run()
+    gevent.wait()
