@@ -8,24 +8,22 @@ https://cardanodocs.com/technical/protocols/network-transport/
 
 import struct
 import enum
-import random
-import binascii
 import uuid
+import socket
 
+import cbor
+from recordclass import recordclass
 import gevent.socket
 import gevent.queue
 import gevent.event
 import gevent.server
 
-import cbor
-from recordclass import recordclass
-
-from .constants import LIGHT_ID_MIN, HEAVY_ID_MIN, WAIT_TIMEOUT
+from .constants import LIGHT_ID_MIN, HEAVY_ID_MIN
 
 PROTOCOL_VERSION = 0
 
-# Utils
 
+# Utils
 class ControlHeader(enum.IntEnum):
     CreatedNewConnection    = 0
     CloseConnection         = 1
@@ -34,6 +32,7 @@ class ControlHeader(enum.IntEnum):
     ProbeSocket             = 4
     ProbeSocketAck          = 5
 
+
 class HandshakeResponse(enum.IntEnum):
     UnsupportedVersion = 0xFFFFFFFF
     Accepted           = 0x00000000
@@ -41,17 +40,22 @@ class HandshakeResponse(enum.IntEnum):
     Crossed            = 0x00000002
     HostMismatch       = 0x00000003
 
+
 def pack_u32(n):
     return struct.pack('>I', n)
+
 
 def unpack_u32(s):
     return struct.unpack('>I', s)[0]
 
+
 def prepend_length(s):
     return struct.pack('>I', len(s)) + s
 
+
 def random_endpoint_address():
     return uuid.uuid4().hex
+
 
 def endpoint_connect(addr, local_addr):
     host, port, id = addr.rsplit(b':', 2)
@@ -59,26 +63,22 @@ def endpoint_connect(addr, local_addr):
     id = int(id)
     try:
         sock = gevent.socket.create_connection((host, port))
-    except e:
+    except socket.error as e:
         return None, str(e)
 
-    while True:
-        msg = struct.pack('>I', PROTOCOL_VERSION) + prepend_length(
-            struct.pack('>I', id) +
-            (prepend_length(local_addr) if local_addr else struct.pack('>I', 0))
-        )
-        sock.sendall(msg)
-        result = HandshakeResponse(unpack_u32(recv_exact(sock, 4)))
-        if result == HandshakeResponse.UnsupportedVersion:
-            version = unpack_u32(recv_exact(sock, 4))
-            continue
-        else:
-            break
+    msg = struct.pack('>I', PROTOCOL_VERSION) + prepend_length(
+        struct.pack('>I', id) +
+        (prepend_length(local_addr) if local_addr else struct.pack('>I', 0))
+    )
+    sock.sendall(msg)
+    result = HandshakeResponse(unpack_u32(recv_exact(sock, 4)))
     return sock, result
+
 
 def connection_id(hid, lid):
     'ConnectionId is unique within all incoming lightweight connections LocalEndPoint.'
     return (hid << 32) | lid
+
 
 def recv_exact(sock, n):
     buf = b''
@@ -88,8 +88,10 @@ def recv_exact(sock, n):
         buf += s
     return buf
 
+
 def send_many(o, *args):
     o.sendall(b''.join(args))
+
 
 class Event(object):
     Received = recordclass('EventReceived', 'connid data')
@@ -99,9 +101,11 @@ class Event(object):
     Error = recordclass('EventError', 'error')
     ReceivedMulticast = recordclass('EventReceivedMulticast', '')
 
+
 class RemoteEndPoint(object):
     '''
-    Represent a heavyweight connection (incoming or outgoing) associated with a LocalEndPoint.
+    Represent a heavyweight connection (incoming or outgoing) associated with a
+    LocalEndPoint.
         id: unique index in associated LocalEndPoint
         addr: address of remote end of connection, "host:port:id"
         local: associated LocalEndPoint object
@@ -110,9 +114,10 @@ class RemoteEndPoint(object):
 
     # Different states
     Error = recordclass('Error', 'error')
-    Init = recordclass('Init', 'evt_resolve origin') # origin: us | them
+    Init = recordclass('Init', 'evt_resolve origin')  # origin: us | them
     Closing = recordclass('Closing', 'evt_resolve valid_state')
     Closed = recordclass('Closed', '')
+
     class Valid(object):
         def __init__(self, sock, origin):
             self.socket = sock
@@ -175,12 +180,14 @@ class RemoteEndPoint(object):
 
     def resolve_init(self, st):
         'leaving init state, notify other listeners.'
-        assert isinstance(self._state, RemoteEndPoint.Init), 'invalid state' + str(self._state)
+        assert isinstance(self._state, RemoteEndPoint.Init), \
+            'invalid state' + str(self._state)
         evt = self._state.evt_resolve
         if isinstance(st, RemoteEndPoint.Closed):
             del self.local._remotes[self._addr]
         self._state = st
         evt.set()
+
 
 class LocalEndPoint(object):
     '''
@@ -191,6 +198,7 @@ class LocalEndPoint(object):
       state: Closed | Valid
     '''
     Closed = recordclass('Closed', '')
+
     class Valid(object):
         '''
         Valid state of LocalEndPoint
@@ -198,7 +206,9 @@ class LocalEndPoint(object):
           queue: Message queue of all incoming events.
         '''
         def __init__(self):
-            self._remotes = {} # addr -> RemoteEndPoint, incoming unaddressable connection use random addr.
+            # incoming unaddressable connection use random addr.
+            # addr -> RemoteEndPoint
+            self._remotes = {}
             self._next_remote_id = HEAVY_ID_MIN
 
             self._queue = gevent.queue.Queue(maxsize=128)
@@ -246,7 +256,7 @@ class LocalEndPoint(object):
           origin: 'us' means outgoing connection, 'them' means incoming connection.
         '''
         lst = self.valid_state
-        assert lst != None, 'local endpoint is closed.'
+        assert lst is not None, 'local endpoint is closed.'
         addr = addr or random_endpoint_address()
         while True:
             remote = lst._remotes.get(addr)
@@ -261,9 +271,10 @@ class LocalEndPoint(object):
                     return remote, False
                 elif isinstance(st, RemoteEndPoint.Init):
                     if origin == 'us':
-                        # wait for ongoing init finish, no need to set timeout here, dependent on another connect request.
+                        # wait for ongoing init finish, no need to set timeout here,
+                        # dependent on another connect request.
                         st.evt_resolve.wait()
-                        continue # retry
+                        continue  # retry
                     elif st.origin == 'us':
                         if self.addr > addr:
                             return remote, True
@@ -284,7 +295,8 @@ class LocalEndPoint(object):
 
     def process_messages_loop(self, sock, remote):
         '''
-        Process incoming messages in standalone thread, change RemoteEndPoint's state, put Event into LocalEndPoint's queue.
+        Process incoming messages in standalone thread,
+        change RemoteEndPoint's state, put Event into LocalEndPoint's queue.
         '''
         q = self.valid_state.queue
         stream = sock.makefile('rb')
@@ -300,17 +312,20 @@ class LocalEndPoint(object):
                         st.incomings.add(lid)
                         st.last_incoming = lid
                     else:
-                        assert isinstance(remote.state, RemoteEndPointStateClosing), 'invalid state'
+                        assert isinstance(remote.state, RemoteEndPoint.Closing), \
+                            'invalid state'
                         # recover closing state.
                         st = remote.state.valid_state
                         st.incomings.add(lid)
                         st.last_incoming = lid
                         remote.resolve_init(st)
-                    q.put(Event.ConnectionOpened(connection_id(remote.id, lid), remote.addr))
+                    q.put(Event.ConnectionOpened(connection_id(remote.id, lid),
+                          remote.addr))
                 elif cmd == ControlHeader.CloseConnection:
-                    q.put(Event.ConnectionClosed(connection_id(remote.id, unpack_u32(stream.read(4)))))
+                    connid = connection_id(remote.id, unpack_u32(stream.read(4)))
+                    q.put(Event.ConnectionClosed(connid))
                 elif cmd == ControlHeader.CloseSocket:
-                    #q.put((cmd, unpack_u32(stream.read(4))))
+                    # q.put((cmd, unpack_u32(stream.read(4))))
                     pass
                 elif cmd == ControlHeader.CloseEndPoint:
                     q.put(Event.EndpointClosed())
@@ -328,13 +343,16 @@ class LocalEndPoint(object):
     def connect(self, addr):
         'create new connection from local endpoint to remote endpoint address'
         st = self.state
-        assert isinstance(st, LocalEndPoint.Valid), 'LocalEndPoint state is invalid: ' + str(st)
+        assert isinstance(st, LocalEndPoint.Valid), \
+            'LocalEndPoint state is invalid: ' + str(st)
         st.remove_if_invalid(addr)
 
         remote, new = self.get_remote_endpoint(addr, 'us')
         if new:
-            # Setup outgoing heavyweight connection, don't send unaddressable local address.
-            sock, result = endpoint_connect(addr, self._transport.addr and self._addr or None)
+            # Setup outgoing heavyweight connection,
+            # don't send unaddressable local address.
+            local_addr = self._transport.addr and self._addr or None
+            sock, result = endpoint_connect(addr, local_addr)
             if sock:
                 if result == HandshakeResponse.Accepted:
                     gevent.spawn(self.process_messages_loop, sock, remote)
@@ -358,7 +376,8 @@ class LocalEndPoint(object):
 
         # create lightweight connection.
         st = remote.state
-        assert isinstance(st, RemoteEndPoint.Valid), 'RemoteEndPoint state is invalid: ' + str(st)
+        assert isinstance(st, RemoteEndPoint.Valid), \
+            'RemoteEndPoint state is invalid: ' + str(st)
         st.outgoing += 1
         lid = st.gen_next_light_id()
         st.socket.sendall(pack_u32(ControlHeader.CreatedNewConnection) + pack_u32(lid))
@@ -367,6 +386,7 @@ class LocalEndPoint(object):
 
     def receive(self, *args):
         return self.valid_state.queue.get(*args)
+
 
 class Connection(object):
     'A lightweight connection.'
@@ -401,16 +421,23 @@ class Connection(object):
             print('invalid RemoteEndPoint state', self._remote.state)
             return
 
-        remote_st.socket.sendall(pack_u32(ControlHeader.CloseConnection) + pack_u32(self._lid))
+        remote_st.socket.sendall(
+            pack_u32(ControlHeader.CloseConnection) + pack_u32(self._lid)
+        )
         # garbbage collection.
         remote_st.outgoing -= 1
         if remote_st.outgoing == 0 and not remote_st.incomings:
-            remote_st.socket.sendall(pack_u32(ControlHeader.CloseSocket) + pack_u32(remote_st.last_incoming))
+            remote_st.socket.sendall(
+                pack_u32(ControlHeader.CloseSocket) + pack_u32(remote_st.last_incoming)
+            )
             remote_st.socket.close()
 
     def send(self, buf):
         assert self._alive, 'send to an inactive connection.'
-        self._remote.valid_state.socket.sendall(pack_u32(self._lid) + prepend_length(buf))
+        self._remote.valid_state.socket.sendall(
+            pack_u32(self._lid) + prepend_length(buf)
+        )
+
 
 class Transport(object):
     def __init__(self, addr=None):
@@ -447,7 +474,10 @@ class Transport(object):
     def endpoint(self):
         'Create new local endpoint.'
         id = self.gen_next_endpoint_id()
-        addr = b'%s:%d:%d' % (self._addr[0].encode(), self._addr[1], id) if self._addr else random_endpoint_address()
+        if self._addr:
+            addr = b'%s:%d:%d' % (self._addr[0].encode(), self._addr[1], id)
+        else:
+            addr = random_endpoint_address()
         local = LocalEndPoint(self, addr, id)
         self._local_endpoints[id] = local
         return local
@@ -477,7 +507,8 @@ class Transport(object):
                 num_host = addr[0].encode()
                 if host != num_host:
                     # address mismatch
-                    send_many(sock, 
+                    send_many(
+                        sock,
                         pack_u32(HandshakeResponse.HostMismatch),
                         prepend_length(host),
                         prepend_length(num_host)
@@ -504,10 +535,11 @@ class Transport(object):
 
             break
 
+
 if __name__ == '__main__':
     from . import config
-    ep = Transport().endpoint() # Unaddressable transport.
-    #ep = Transport(('127.0.0.1', 3000)).endpoint()
+    ep = Transport().endpoint()  # Unaddressable transport.
+    # ep = Transport(('127.0.0.1', 3000)).endpoint()
     print('connect')
     conn = ep.connect(config.MAINCHAIN_ADDR)
 
@@ -515,43 +547,43 @@ if __name__ == '__main__':
     # send peer data.
 
     DEFAULT_PEER_DATA = [
-        764824073, # protocol magic.
-        [0,1,0],   # version
+        764824073,  # protocol magic.
+        [0, 1, 0],    # version
         {
-            0x04:  [0, cbor.Tag(24, cbor.dumps(0x05))],
-            0x05:  [0, cbor.Tag(24, cbor.dumps(0x04))],
-            0x06:  [0, cbor.Tag(24, cbor.dumps(0x07))],
-            0x22:  [0, cbor.Tag(24, cbor.dumps(0x5e))],
-            0x25:  [0, cbor.Tag(24, cbor.dumps(0x5e))],
-            0x2b:  [0, cbor.Tag(24, cbor.dumps(0x5d))],
-            0x31:  [0, cbor.Tag(24, cbor.dumps(0x5c))],
-            0x37:  [0, cbor.Tag(24, cbor.dumps(0x62))],
-            0x3d:  [0, cbor.Tag(24, cbor.dumps(0x61))],
-            0x43:  [0, cbor.Tag(24, cbor.dumps(0x60))],
-            0x49:  [0, cbor.Tag(24, cbor.dumps(0x5f))],
-            0x53:  [0, cbor.Tag(24, cbor.dumps(0x00))],
-            0x5c:  [0, cbor.Tag(24, cbor.dumps(0x31))],
-            0x5d:  [0, cbor.Tag(24, cbor.dumps(0x2b))],
-            0x5e:  [0, cbor.Tag(24, cbor.dumps(0x25))],
-            0x5f:  [0, cbor.Tag(24, cbor.dumps(0x49))],
-            0x60:  [0, cbor.Tag(24, cbor.dumps(0x43))],
-            0x61:  [0, cbor.Tag(24, cbor.dumps(0x3d))],
-            0x62:  [0, cbor.Tag(24, cbor.dumps(0x37))],
+            0x04: [0, cbor.Tag(24, cbor.dumps(0x05))],
+            0x05: [0, cbor.Tag(24, cbor.dumps(0x04))],
+            0x06: [0, cbor.Tag(24, cbor.dumps(0x07))],
+            0x22: [0, cbor.Tag(24, cbor.dumps(0x5e))],
+            0x25: [0, cbor.Tag(24, cbor.dumps(0x5e))],
+            0x2b: [0, cbor.Tag(24, cbor.dumps(0x5d))],
+            0x31: [0, cbor.Tag(24, cbor.dumps(0x5c))],
+            0x37: [0, cbor.Tag(24, cbor.dumps(0x62))],
+            0x3d: [0, cbor.Tag(24, cbor.dumps(0x61))],
+            0x43: [0, cbor.Tag(24, cbor.dumps(0x60))],
+            0x49: [0, cbor.Tag(24, cbor.dumps(0x5f))],
+            0x53: [0, cbor.Tag(24, cbor.dumps(0x00))],
+            0x5c: [0, cbor.Tag(24, cbor.dumps(0x31))],
+            0x5d: [0, cbor.Tag(24, cbor.dumps(0x2b))],
+            0x5e: [0, cbor.Tag(24, cbor.dumps(0x25))],
+            0x5f: [0, cbor.Tag(24, cbor.dumps(0x49))],
+            0x60: [0, cbor.Tag(24, cbor.dumps(0x43))],
+            0x61: [0, cbor.Tag(24, cbor.dumps(0x3d))],
+            0x62: [0, cbor.Tag(24, cbor.dumps(0x37))],
         },
         {
-            0x04:  [0, cbor.Tag(24, cbor.dumps(0x05))],
-            0x05:  [0, cbor.Tag(24, cbor.dumps(0x04))],
-            0x06:  [0, cbor.Tag(24, cbor.dumps(0x07))],
-            0x0d:  [0, cbor.Tag(24, cbor.dumps(0x00))],
-            0x0e:  [0, cbor.Tag(24, cbor.dumps(0x00))],
-            0x25:  [0, cbor.Tag(24, cbor.dumps(0x5e))],
-            0x2b:  [0, cbor.Tag(24, cbor.dumps(0x5d))],
-            0x31:  [0, cbor.Tag(24, cbor.dumps(0x5c))],
-            0x37:  [0, cbor.Tag(24, cbor.dumps(0x62))],
-            0x3d:  [0, cbor.Tag(24, cbor.dumps(0x61))],
-            0x43:  [0, cbor.Tag(24, cbor.dumps(0x60))],
-            0x49:  [0, cbor.Tag(24, cbor.dumps(0x5f))],
-            0x53:  [0, cbor.Tag(24, cbor.dumps(0x00))],
+            0x04: [0, cbor.Tag(24, cbor.dumps(0x05))],
+            0x05: [0, cbor.Tag(24, cbor.dumps(0x04))],
+            0x06: [0, cbor.Tag(24, cbor.dumps(0x07))],
+            0x0d: [0, cbor.Tag(24, cbor.dumps(0x00))],
+            0x0e: [0, cbor.Tag(24, cbor.dumps(0x00))],
+            0x25: [0, cbor.Tag(24, cbor.dumps(0x5e))],
+            0x2b: [0, cbor.Tag(24, cbor.dumps(0x5d))],
+            0x31: [0, cbor.Tag(24, cbor.dumps(0x5c))],
+            0x37: [0, cbor.Tag(24, cbor.dumps(0x62))],
+            0x3d: [0, cbor.Tag(24, cbor.dumps(0x61))],
+            0x43: [0, cbor.Tag(24, cbor.dumps(0x60))],
+            0x49: [0, cbor.Tag(24, cbor.dumps(0x5f))],
+            0x53: [0, cbor.Tag(24, cbor.dumps(0x00))],
         },
     ]
 
@@ -559,13 +591,16 @@ if __name__ == '__main__':
     nonce = 1
     conn.send(b'S' + struct.pack('>Q', nonce))
 
-    cmd = ep.receive() # create new connection
+    cmd = ep.receive()  # create new connection
     assert isinstance(cmd, Event.ConnectionOpened), 'invalid response'
     connid = cmd.connid
-    cmd = ep.receive() # peerdata
+    cmd = ep.receive()  # peerdata
     assert isinstance(cmd, Event.Received) and connid == cmd.connid, 'invalid response'
     print('peer data response', cbor.loads(cmd.data))
-    cmd = ep.receive() # nodeid
-    assert isinstance(cmd, Event.Received) and connid == cmd.connid and cmd.data[:1] == b'A' and struct.unpack('>Q', cmd.data[1:])[0] == nonce, 'invalid response'
+    cmd = ep.receive()  # nodeid
+    assert isinstance(cmd, Event.Received) and \
+        connid == cmd.connid and \
+        cmd.data[:1] == b'A' and \
+        struct.unpack('>Q', cmd.data[1:])[0] == nonce, 'invalid response'
 
     print(ep.receive())

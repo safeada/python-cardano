@@ -12,19 +12,21 @@ from .node import Node, Worker, Message
 from .utils import get_current_slot, flatten_slotid
 from . import config
 
+
 # Workers
 class GetHeaders(Worker):
     message_type = Message.GetHeaders
 
     def __call__(self, from_, to):
         self.conv.send(cbor.dumps([cbor.VarList(from_), [to] if to else []]))
-        tag, data = cbor.loads(self.conv.receive()) # sum type MsgHeaders
-        if tag == 1: # NoHeaders
+        tag, data = cbor.loads(self.conv.receive())  # sum type MsgHeaders
+        if tag == 1:  # NoHeaders
             return []
         return [DecodedBlockHeader(item) for item in data]
 
     def tip(self):
         return self([], None)[0]
+
 
 class GetBlocks(Worker):
     message_type = Message.GetBlocks
@@ -36,9 +38,10 @@ class GetBlocks(Worker):
             if not buf:
                 # closed by remote.
                 break
-            tag, data = cbor.loads(buf) # \x82, \x00, block_raw_data
-            if tag == 0: # MsgBlock
+            tag, data = cbor.loads(buf)  # \x82, \x00, block_raw_data
+            if tag == 0:  # MsgBlock
                 yield DecodedBlock(data, buf[2:])
+
 
 class StreamBlocks(Worker):
     message_type = Message.Stream
@@ -64,11 +67,12 @@ class StreamBlocks(Worker):
                 # closed by remote.
                 print('connection closed')
                 break
-            tag, data = cbor.loads(buf) # \x82, \x00, block_raw_data
+            tag, data = cbor.loads(buf)  # \x82, \x00, block_raw_data
             if tag != 0:
                 print('stream ended', tag, data)
                 break
             yield DecodedBlock(data, buf[2:])
+
 
 class Subscribe(Worker):
     message_type = Message.Subscribe
@@ -83,12 +87,14 @@ class Subscribe(Worker):
             # keep alive
             self.conv.send(cbor.dumps(43))
 
+
 class Subscribe1(Worker):
     message_type = Message.Subscribe1
 
     def __call__(self):
         # instance Bi MsgSubscribe1
         self.conv.send(cbor.dumps(42))
+
 
 workers = [
     GetHeaders,
@@ -97,6 +103,7 @@ workers = [
     Subscribe,
     Subscribe1,
 ]
+
 
 # Listeners
 def handle_get_headers(node, conv):
@@ -107,17 +114,20 @@ def handle_get_headers(node, conv):
             print('remote closed')
             break
         print('request', cbor.loads(data))
-        conv.send(cbor.dumps([0, []])) # NoHeaders
+        conv.send(cbor.dumps([0, []]))  # NoHeaders
+
 
 def handle_get_blocks(node, conv):
     'Peer wants some blocks from us.'
     data = cbor.loads(conv.receive())
     print('request', data)
-    conv.send(cbor.dumps([1])) # NoBlock
+    conv.send(cbor.dumps([1]))  # NoBlock
+
 
 def handle_stream_start(node, conv):
     'Peer wants to stream some blocks from us.'
     pass
+
 
 def handle_headers(node, conv):
     'Peer has a block header for us (yes, singular only).'
@@ -126,7 +136,7 @@ def handle_headers(node, conv):
         print('remote closed')
         return
     tag, headers = cbor.loads(data)
-    assert tag==0 and len(headers) == 1, 'invalid header message'
+    assert tag == 0 and len(headers) == 1, 'invalid header message'
     header = DecodedBlockHeader(headers[0])
     print('got new block header', binascii.hexlify(header.hash()).decode())
 
@@ -136,12 +146,14 @@ def handle_headers(node, conv):
 
     node.retriever.add_retrieval_task(conv.addr, header)
 
+
 listeners = {
     Message.GetHeaders: handle_get_headers,
-    #Message.GetBlocks: handle_get_blocks,
-    #Message.Stream: handle_stream_start,
+    # Message.GetBlocks: handle_get_blocks,
+    # Message.Stream: handle_stream_start,
     Message.Headers: handle_headers,
 }
+
 
 class LogicNode(Node):
     def __init__(self, ep, store):
@@ -156,7 +168,10 @@ class LogicNode(Node):
         self.retriever_thread = gevent.spawn(self.retriever)
 
         # recover trigger
-        self.trigger_recovery_thread = gevent.spawn(self._trigger_recovery_worker, config.SECURITY_PARAMETER_K * 2)
+        self.trigger_recovery_thread = gevent.spawn(
+            self._trigger_recovery_worker,
+            config.SECURITY_PARAMETER_K * 2
+        )
 
         # dns subscribe worker
         self.subscribe_thread = gevent.spawn(self._subscribe)
@@ -187,6 +202,7 @@ class LogicNode(Node):
         w = self.worker(Message.Subscribe, config.MAINCHAIN_ADDR)
         w()
         w.keepalive()
+
 
 if __name__ == '__main__':
     from .transport import Transport

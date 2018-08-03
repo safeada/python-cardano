@@ -19,13 +19,12 @@ Sync
 
 '''
 import os
-import binascii
-import itertools
 
 import cbor
 import rocksdb
 
 from .block import DecodedBlock, DecodedBlockHeader
+
 
 def iter_prefix(db, prefix):
     it = db.iteritems()
@@ -35,23 +34,27 @@ def iter_prefix(db, prefix):
             break
         yield k, v
 
+
 def remove_prefix(db, prefix):
     batch = rocksdb.WriteBatch()
     for k, _ in iter_prefix(db, prefix):
         batch.delete(k)
     db.write(batch)
 
+
 class Storage(object):
     def __init__(self, root_path, readonly=False):
         self._root_path = root_path
-        self.db = rocksdb.DB(os.path.join(self._root_path, 'db'), rocksdb.Options(create_if_missing=True), readonly)
-        self._tip = None # cache current tip in memory.
+        opt = rocksdb.Options(create_if_missing=True)
+        self.db = rocksdb.DB(os.path.join(self._root_path, 'db'), opt, readonly)
+        self._tip = None  # cache current tip in memory.
 
     def epoch_db_path(self, epoch):
-        return os.path.join(self._root_path, 'epoch%d'%epoch)
+        return os.path.join(self._root_path, 'epoch%d' % epoch)
 
     def open_epoch_db(self, epoch, readonly=False):
-        return rocksdb.DB(self.epoch_db_path(epoch), rocksdb.Options(create_if_missing=True), readonly)
+        opt = rocksdb.Options(create_if_missing=True)
+        return rocksdb.DB(self.epoch_db_path(epoch), opt, readonly)
 
     def tip(self):
         if not self._tip:
@@ -66,7 +69,7 @@ class Storage(object):
         return self.open_epoch_db(0).get(b'genesis')
 
     def blockheader(self, hash):
-        buf = self.db.get(b'b/'+hash)
+        buf = self.db.get(b'b/' + hash)
         if buf:
             return DecodedBlockHeader.from_raw(buf, hash)
 
@@ -98,7 +101,9 @@ class Storage(object):
     def blocks(self, start_hash=None):
         'Iterate blocks forwardly.'
         if start_hash:
-            current_epoch, _ = DecodedBlockHeader(cbor.loads(self.db.get(b'b/'+start_hash))).slot()
+            current_epoch, _ = DecodedBlockHeader(
+                cbor.loads(self.db.get(b'b/' + start_hash))
+            ).slot()
         else:
             start_hash = self.genesis_block_hash()
             current_epoch = 0
@@ -132,7 +137,7 @@ class Storage(object):
         'Iterate block header backwardly.'
         current_hash = self.tip()
         while True:
-            raw = self.db.get(b'b/'+current_hash)
+            raw = self.db.get(b'b/' + current_hash)
             if not raw:
                 break
             hdr = DecodedBlockHeader(cbor.loads(raw), raw)
@@ -142,9 +147,9 @@ class Storage(object):
     def blockheaders(self):
         current_hash = self.genesis_block_hash()
         while True:
-            raw = self.db.get(b'b/'+current_hash)
+            raw = self.db.get(b'b/' + current_hash)
             yield DecodedBlockHeader(cbor.loads(raw), raw)
-            current_hash = self.db.get(b'e/fl/'+current_hash)
+            current_hash = self.db.get(b'e/fl/' + current_hash)
             if not current_hash:
                 break
 
@@ -183,4 +188,3 @@ class Storage(object):
         prefix = b'ut/t/'
         for k, v in iter_prefix(self.db, prefix):
             yield TxIn(*cbor.loads(k[len(prefix):])), TxOut(*cbor.loads(v))
-

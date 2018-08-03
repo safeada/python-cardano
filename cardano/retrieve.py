@@ -1,35 +1,33 @@
-import binascii
-
 import gevent.queue
 import gevent.event
 
-from .storage import Storage
-from .transport import Transport
-from .node import default_node, Message
-from .utils import flatten_slotid, get_current_slot
+from .node import Message
+from .utils import get_current_slot
+
 
 def classify_new_header(tip_header, header):
     current_slot = get_current_slot()
     hdr_slot = header.slot()
-    #if hdr_slot[1] == None:
-    #    # genesis block
-    #    print('new header is genesis block')
-    #    return # useless
+    # if hdr_slot[1] == None:
+    #     # genesis block
+    #     print('new header is genesis block')
+    #     return # useless
     if hdr_slot > current_slot:
         print('new header is for future slot')
-        return # future slot
+        return  # future slot
     if hdr_slot <= tip_header.slot():
         print('new header slot not advanced than tip')
         return
 
     if header.prev_header() == tip_header.hash():
         # TODO verify new header
-        return True # is's a continuation
+        return True  # is's a continuation
     else:
         # check difficulty
         if header.difficulty() > tip_header.difficulty():
             # longer alternative chain.
             return False
+
 
 class BlockRetriever(object):
     def __init__(self, store, node):
@@ -102,10 +100,10 @@ class BlockRetriever(object):
     def _handle_retrieval_task(self, addr, header):
         tip_header = self.store.blockheader(self.store.tip())
         result = classify_new_header(tip_header, header)
-        if result == True:
+        if result is True:
             # continuation, get a single block.
             self._single_block(addr, header.hash())
-        elif result == False:
+        elif result is False:
             # alternative, enter recovery mode.
             self._set_recovery_task(addr, header)
 
@@ -150,5 +148,6 @@ class BlockRetriever(object):
 
     def _update_last_known_header(self, header):
         # update last known header
-        if not self.last_known_header or header.difficulty() > self.last_known_header.difficulty():
+        if not self.last_known_header or \
+                header.difficulty() > self.last_known_header.difficulty():
             self.last_known_header = header

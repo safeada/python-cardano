@@ -13,6 +13,7 @@ import gevent.event
 from .transport import Event
 from .constants import WAIT_TIMEOUT, PROTOCOL_MAGIC
 
+
 class Message(enum.IntEnum):
     Void = 0
     GetHeaders = 4
@@ -24,6 +25,7 @@ class Message(enum.IntEnum):
     Stream = 15
     StreamBlock = 16
 
+
 MessageSndRcv = {
     Message.GetHeaders: Message.Headers,
     Message.Headers: Message.GetHeaders,
@@ -33,13 +35,17 @@ MessageSndRcv = {
     Message.Subscribe1: Message.Void,
 }
 
+
 def make_peer_data(workers, listeners):
     peer_data = [PROTOCOL_MAGIC, [0, 1, 0], {}, {}]
     for cls in workers:
-        peer_data[3][cls.message_type] = [0, cbor.Tag(24, cbor.dumps(MessageSndRcv[cls.message_type]))]
+        peer_data[3][cls.message_type] = [
+            0,
+            cbor.Tag(24, cbor.dumps(MessageSndRcv[cls.message_type]))]
     for msgtype in listeners.keys():
         peer_data[2][msgtype] = [0, cbor.Tag(24, cbor.dumps(MessageSndRcv[msgtype]))]
     return peer_data
+
 
 class Conversation(object):
     'Bidirectional connection.'
@@ -84,6 +90,7 @@ class Conversation(object):
             self._conn.close()
         self._queue.put(StopIteration)
 
+
 class Node(object):
     def __init__(self, ep, workers, listeners):
         self._endpoint = ep
@@ -91,7 +98,8 @@ class Node(object):
         self._listeners = listeners
         self._peer_data = make_peer_data(workers, listeners)
 
-        # The first connect request send peer data, other concurrent requests need to wait, addr -> state (None | 'done' | Event)
+        # The first connect request send peer data, other concurrent requests need to wait
+        # addr -> state (None | 'done' | Event)
         self._peer_sending = {}
         # Received peer_data, addr -> peer_data
         self._peer_received = {}
@@ -124,8 +132,8 @@ class Node(object):
         # Waiting for peer data to be transmitted.
         st = self._peer_sending.get(addr)
         if st == 'done':
-            pass # already done.
-        elif st == None:
+            pass  # already done.
+        elif st is None:
             # transmit and notify pending connections.
             print('sending our peer data')
             evt = gevent.event.Event()
@@ -135,7 +143,7 @@ class Node(object):
             evt.set()
         else:
             assert isinstance(st, gevent.event.Event), 'invalid state: ' + str(st)
-            st.wait() # wait for peer data transmiting.
+            st.wait()  # wait for peer data transmiting.
         return conn
 
     def connect(self, addr):
@@ -173,7 +181,7 @@ class Node(object):
                     continue
 
                 nonce = self._incoming_nonce.get(ev.connid)
-                if nonce == None:
+                if nonce is None:
                     direction = ev.data[:1]
                     nonce = struct.unpack('>Q', ev.data[1:])[0]
                     self._incoming_nonce[ev.connid] = nonce
@@ -220,11 +228,12 @@ class Node(object):
         assert cls.message_type == msgtype
         conv = self.connect(addr)
         if msgtype not in conv.peer_data[2]:
-            #print('Remote peer don\'t support this message type.')
+            # print('Remote peer don\'t support this message type.')
             return
 
         conv.send(cbor.dumps(msgtype))
         return cls(conv)
+
 
 class Worker(object):
     def __init__(self, conv):
@@ -233,9 +242,11 @@ class Worker(object):
     def close(self):
         self.conv.close()
 
+
 def default_node(ep):
     from .logic import workers, listeners
     return Node(ep, workers, listeners)
+
 
 if __name__ == '__main__':
     from .transport import Transport

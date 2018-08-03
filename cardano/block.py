@@ -1,17 +1,15 @@
 '''
 Main data structures of blockchain.
 
-Rather than fully decode the data into python object, we access the required fields from cbor data.
+Rather than fully decode the data into python object,
+we access the required fields from cbor data.
 It's more efficient this way at most scenario.
 
 We also try to cache raw data, to prevent re-serialization.
 '''
-from collections import namedtuple
-import hashlib
-import binascii
-import base58
 import cbor
 from .utils import hash_serialized, hash_data
+
 
 class DecodedBase(object):
     def __init__(self, data, raw=None, hash=None):
@@ -54,10 +52,13 @@ class DecodedBlockHeader(DecodedBase):
         n, = self.data[1][3][2]
         return n
 
+
 class DecodedTransaction(DecodedBase):
     def tx(self):
         from .wallet import Tx, TxIn, TxOut
-        inputs = set(TxIn(*cbor.loads(item.value)) for tag, item in self.data[0] if tag == 0)
+        inputs = set(TxIn(*cbor.loads(item.value))
+                     for tag, item in self.data[0]
+                     if tag == 0)
         outputs = [TxOut(cbor.dumps(addr), c) for addr, c in self.data[1]]
         return Tx(self.txid(), inputs, outputs)
 
@@ -85,7 +86,7 @@ class DecodedBlock(DecodedBase):
 
     def utxos(self):
         'Set of inputs spent, and UTxO created.'
-        from .wallet import Tx, TxIn, TxOut
+        from .wallet import TxIn
         txins = set()
         utxo = {}
         # Process in reversed order, so we can remote inputs spent by current block.
