@@ -49,12 +49,22 @@ class Storage(object):
         self.db = rocksdb.DB(os.path.join(self._root_path, 'db'), opt, readonly)
         self._tip = None  # cache current tip in memory.
 
+        # cache recent used epoch db.
+        self._current_epoch_db = None
+        self._current_epoch = None
+
     def epoch_db_path(self, epoch):
         return os.path.join(self._root_path, 'epoch%d' % epoch)
 
     def open_epoch_db(self, epoch, readonly=False):
-        opt = rocksdb.Options(create_if_missing=True)
-        return rocksdb.DB(self.epoch_db_path(epoch), opt, readonly)
+        if epoch != self._current_epoch:
+            self._current_epoch = epoch
+            self._current_epoch_db = rocksdb.DB(
+                self.epoch_db_path(epoch),
+                rocksdb.Options(create_if_missing=True),
+                readonly
+            )
+        return self._current_epoch_db
 
     def tip(self):
         if not self._tip:
@@ -175,6 +185,11 @@ class Storage(object):
         self.utxo_apply_block(block, batch)
         self.set_tip(hash, batch)
         self.db.write(batch)
+
+        # write body
+        epoch, _ = hdr.slot()
+        db = self.open_epoch_db(epoch, readonly=True)
+        db.put(hash, block.raw())
 
     def utxo_apply_block(self, block, batch):
         txins, utxo = block.utxos()
