@@ -64,12 +64,6 @@ class BlockRetriever(object):
     def recovering(self):
         return bool(self._recovery)
 
-    def trigger_recovery(self, addr):
-        'trigger recovery actively by requesting tip'
-        print('recovery triggered.')
-        w = self.node.worker(Message.GetHeaders, addr)
-        self.add_retrieval_task(addr, w.tip())
-
     def status(self):
         'syncing: return sync progress; not syncing: return None'
         if self._recovery:
@@ -126,6 +120,7 @@ class BlockRetriever(object):
         print('got headers', len(headers))
         if not headers:
             return
+        assert headers[-1].prev_header() == self.store.tip(), 'Don\'t support forks yet.'
         w_blocks = self.node.worker(Message.GetBlocks, addr)
         blocks = list(w_blocks(headers[-1].hash(), headers[0].hash()))
         print('got blocks', len(blocks))

@@ -49,7 +49,10 @@ class DecodedBlockHeader(DecodedBase):
         return self.data[0] == 0
 
     def difficulty(self):
-        n, = self.data[1][3][2]
+        if self.is_genesis():
+            n, = self.data[1][3][1]
+        else:
+            n, = self.data[1][3][2]
         return n
 
 

@@ -57,15 +57,32 @@ def random_endpoint_address():
     return uuid.uuid4().hex
 
 
-def endpoint_connect(addr, local_addr):
-    host, port, id = addr.rsplit(b':', 2)
-    print('create heavyweight connection to %s:%s' % (host.decode(), port.decode()))
-    id = int(id)
-    try:
-        sock = gevent.socket.create_connection((host, port))
-    except socket.error as e:
-        return None, str(e)
+def make_endpoint_addr(host, port, id):
+    return b'%s:%d:%d' % (host, port, id)
 
+
+def parse_endpoint_addr(addr):
+    parts = addr.rsplit(b':', 2)
+    if len(parts) == 3:
+        return parts[0], int(parts[1]), int(parts[2])
+    elif len(parts) == 2:
+        return parts[0], int(parts[1]), 0
+    elif len(parts) == 1:
+        return parts[0], 80, 0
+    else:
+        assert False, 'impossible'
+
+
+def normalize_endpoint_addr(addr):
+    return make_endpoint_addr(*parse_endpoint_addr(addr))
+
+
+def endpoint_connect(addr, local_addr):
+    host, port, id = parse_endpoint_addr(addr)
+    print('create heavyweight connection to %s:%d' % (host.decode(), port))
+    id = int(id)
+
+    sock = gevent.socket.create_connection((host, port))
     msg = struct.pack('>I', PROTOCOL_VERSION) + prepend_length(
         struct.pack('>I', id) +
         (prepend_length(local_addr) if local_addr else struct.pack('>I', 0))
@@ -352,17 +369,20 @@ class LocalEndPoint(object):
             # Setup outgoing heavyweight connection,
             # don't send unaddressable local address.
             local_addr = self._transport.addr and self._addr or None
-            sock, result = endpoint_connect(addr, local_addr)
-            if sock:
+            try:
+                sock, result = endpoint_connect(addr, local_addr)
+            except gevent.socket.error as e:
+                remote.resolve_init(RemoteEndPoint.Error('connect error: ' + str(e)))
+            else:
                 if result == HandshakeResponse.Accepted:
                     gevent.spawn(self.process_messages_loop, sock, remote)
                     remote.resolve_init(RemoteEndPoint.Valid(sock, 'us'))
                 elif result == HandshakeResponse.Crossed:
+                    print('connection crossed, close our connection to', addr.decode())
                     if isinstance(remote.state, RemoteEndPoint.Init):
                         # Remote connection request has not came yet, remove the endpoint.
                         remote.resolve_init(RemoteEndPoint.Closed())
                         sock.close()
-                        return
                     else:
                         # Remote connection already arrived, then re-use the connection.
                         assert isinstance(remote.state, RemoteEndPoint.Valid)
@@ -370,9 +390,6 @@ class LocalEndPoint(object):
                 else:
                     remote.resolve_init(RemoteEndPoint.Closed())
                     sock.close()
-                    return
-            else:
-                remote.resolve_init(RemoteEndPoint.Error('connec failed'))
 
         # create lightweight connection.
         st = remote.state
@@ -475,7 +492,7 @@ class Transport(object):
         'Create new local endpoint.'
         id = self.gen_next_endpoint_id()
         if self._addr:
-            addr = b'%s:%d:%d' % (self._addr[0].encode(), self._addr[1], id)
+            addr = make_endpoint_addr(self._addr[0].encode(), self._addr[1], id)
         else:
             addr = random_endpoint_address()
         local = LocalEndPoint(self, addr, id)
@@ -502,7 +519,7 @@ class Transport(object):
             remote_addr = None
             if size > 0:
                 remote_addr = recv_exact(sock, size)
-                (host, _, _) = remote_addr.rsplit(b':', 2)
+                (host, _, _) = parse_endpoint_addr(remote_addr)
                 # check their host TODO getnameinfo
                 num_host = addr[0].encode()
                 if host != num_host:

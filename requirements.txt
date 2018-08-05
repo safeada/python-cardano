@@ -8,3 +8,4 @@ recordclass==0.5
 tlslite-ng==0.7.4
 -e git+https://github.com/yihuang/cbor_py.git@a3b3700022199ba36fd8b26730450a2f247c51b9#egg=cbor
 python-rocksdb==0.6.9
+dnspython==1.15.0

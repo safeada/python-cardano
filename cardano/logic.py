@@ -3,6 +3,9 @@ Logic includes workers and listeners.
 '''
 import binascii
 import random
+import time
+import math
+import traceback
 
 import gevent
 import cbor
@@ -155,6 +158,10 @@ listeners = {
 }
 
 
+def retry_duration(duration):
+    return math.floor(config.SLOT_DURATION / 2 ** (duration / config.SLOT_DURATION))
+
+
 class LogicNode(Node):
     def __init__(self, ep, store):
         super(LogicNode, self).__init__(ep, workers, listeners)
@@ -174,7 +181,20 @@ class LogicNode(Node):
         )
 
         # dns subscribe worker
-        self.subscribe_thread = gevent.spawn(self._subscribe)
+        self._peers = gevent.event.AsyncResult()  # set of peer addresses
+        self.subscribe_thread = gevent.spawn(self._subscribe, [config.MAINCHAIN_ADDR])
+
+    def _trigger_recovery(self):
+        'trigger recovery actively by requesting tip'
+        print('recovery triggered.')
+        for addr in list(self._peers.get()):  # use list to iterating a copy.
+            try:
+                header = self.worker(Message.GetHeaders, addr).tip()
+            except Exception as e:
+                traceback.print_exc()
+                print('get tip failed', str(e))
+            else:
+                self.retriever.add_retrieval_task(addr, header)
 
     def _trigger_recovery_worker(self, lag_behind):
         while True:
@@ -185,7 +205,7 @@ class LogicNode(Node):
                 slot_diff = flatten_slotid(cur_slot) - flatten_slotid(tip_slot)
                 if slot_diff >= lag_behind:
                     # need to recovery.
-                    self.retriever.trigger_recovery(config.MAINCHAIN_ADDR)
+                    self._trigger_recovery()
                     triggered = True
                 elif slot_diff < 0:
                     print('tip slot is in future.')
@@ -193,15 +213,33 @@ class LogicNode(Node):
             if not triggered:
                 # random
                 if random.random() < 0.004 and slot_diff >= 5:
-                    self.retriever.trigger_recovery(config.MAINCHAIN_ADDR)
+                    self._trigger_recovery()
                     triggered = True
 
-            gevent.sleep(20 if triggered else 1)
+            gevent.sleep(20 if triggered else 1, True)
 
-    def _subscribe(self):
-        w = self.worker(Message.Subscribe, config.MAINCHAIN_ADDR)
-        w()
-        w.keepalive()
+    def _subscribe(self, domains):
+        from .peers import resolve_loop
+        for addr in resolve_loop(domains):
+            start = time.time()
+
+            if not self._peers.ready():
+                self._peers.set(set([addr]))
+            else:
+                self._peers.get().add(addr)
+
+            try:
+                print('subscribing to', addr.decode())
+                w = self.worker(Message.Subscribe, addr)
+                w()
+                w.keepalive()
+            except Exception as e:
+                traceback.print_exc()
+                print('subscribtion failed:' + str(e))
+                # remove peers
+                self._peers.get().remove(addr)
+
+            gevent.sleep(retry_duration(time.time() - start))
 
 
 if __name__ == '__main__':

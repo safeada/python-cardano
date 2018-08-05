@@ -188,7 +188,7 @@ class Storage(object):
 
         # write body
         epoch, _ = hdr.slot()
-        db = self.open_epoch_db(epoch, readonly=True)
+        db = self.open_epoch_db(epoch, readonly=False)
         db.put(hash, block.raw())
 
     def utxo_apply_block(self, block, batch):
