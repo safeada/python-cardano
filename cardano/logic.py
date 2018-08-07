@@ -48,6 +48,7 @@ class GetBlocks(Worker):
     def one(self, h):
         return next(self(h, h))
 
+
 class StreamBlocks(Worker):
     message_type = Message.Stream
 
@@ -126,7 +127,7 @@ def handle_get_blocks(node, conv):
     'Peer wants some blocks from us.'
     data = cbor.loads(conv.receive())
     print('request', data)
-    conv.send(cbor.dumps([1]))  # NoBlock
+    conv.send(cbor.dumps([1, 0]))  # NoBlock
 
 
 def handle_stream_start(node, conv):
@@ -154,8 +155,8 @@ def handle_headers(node, conv):
 
 listeners = {
     Message.GetHeaders: handle_get_headers,
-    # Message.GetBlocks: handle_get_blocks,
-    # Message.Stream: handle_stream_start,
+    Message.GetBlocks: handle_get_blocks,
+    Message.Stream: handle_stream_start,
     Message.Headers: handle_headers,
 }
 

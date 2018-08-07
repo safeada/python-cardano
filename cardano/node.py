@@ -10,7 +10,7 @@ import cbor
 import gevent
 import gevent.event
 
-from .transport import Event
+from .transport import Event, RemoteEndPoint
 from .constants import WAIT_TIMEOUT, PROTOCOL_MAGIC
 
 
@@ -49,18 +49,18 @@ def make_peer_data(workers, listeners):
 
 class Conversation(object):
     'Bidirectional connection.'
-    def __init__(self, conn, queue, addr, peer_data):
+    def __init__(self, node, conn, queue, addr):
+        self._node = node
         self._conn = conn    # sending side.
         self._queue = queue  # receive message.
         self._addr = addr    # remote address.
-        self._peer_data = peer_data
 
     def __gc__(self):
         self.close()
 
     @property
     def peer_data(self):
-        return self._peer_data
+        return self._node._peer_received[self._addr][0]
 
     @property
     def addr(self):
@@ -74,17 +74,23 @@ class Conversation(object):
         if o == StopIteration:
             # closed by remote
             if self._conn.alive:
-                self._conn.close()
+                self.close()
             self._queue = None
         else:
             return o
 
     def closed(self):
-        return self._conn.alive
+        return not self._conn.alive
 
     def close(self):
-        'close by us.'
+        'close our end.'
+        if self.closed():
+            return
         self._conn.close()
+        remote = self._node._endpoint.valid_state._remotes[self._addr]
+        if isinstance(remote.state, RemoteEndPoint.Closing) or \
+                remote.valid_state.outgoing == 0:
+            self._node._peer_sending.pop(self._addr)
 
 
 class Node(object):
@@ -158,7 +164,7 @@ class Node(object):
             self._wait_for_queue.pop((nonce, addr))
             conn.close()
             raise
-        return Conversation(conn, queue, addr, self._peer_received[addr][0])
+        return Conversation(self, conn, queue, addr)
 
     def dispatcher(self):
         ep = self._endpoint
@@ -213,7 +219,7 @@ class Node(object):
         # Will use the exist tcp connection.
         conn = self._connect_peer(addr)
         conn.send(b'A' + struct.pack('>Q', nonce))
-        conv = Conversation(conn, queue, addr, self._peer_received[addr][0])
+        conv = Conversation(self, conn, queue, addr)
 
         # run listener.
         try:

@@ -1,14 +1,28 @@
 import gevent
-from cardano.node import Transport, default_node, Message
+from cardano.transport import Transport
+from cardano.node import default_node, Message
+
 
 def test_simple():
-    n1 = default_node(Transport(('127.0.0.1', 3000)).endpoint())
-    n2 = default_node(Transport(('127.0.0.1', 3001)).endpoint())
+    t1 = Transport(('127.0.0.1', 3000))
+    t2 = Transport(('127.0.0.1', 3001))
 
-    worker = n1.worker(Message.GetHeaders, n2.endpoint.addr)
-    print(worker([], None))
+    n1 = default_node(t1.endpoint())
+    n2 = default_node(t2.endpoint())
+
+    worker = n1.worker(Message.GetBlocks, n2.endpoint.addr)
+    print(list(worker(b'test', b'test')))
     worker.close()
-    gevent.sleep(1)
+
+    print('second try')
+    worker = n1.worker(Message.GetBlocks, n2.endpoint.addr)
+    print(list(worker(b'test', b'test')))
+    worker.close()
+
+    t1.close()
+    t2.close()
+
 
 if __name__ == '__main__':
     test_simple()
+    gevent.sleep(0.1)
