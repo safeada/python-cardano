@@ -21,7 +21,6 @@ import pbkdf2
 import base58
 
 from . import cbits
-from .cbits import DERIVATION_V1
 from .utils import hash_data
 from .constants import BIP44_PURPOSE, BIP44_COIN_TYPE
 
@@ -36,8 +35,8 @@ def gen_root_xpriv(seed, passphase):
     seed = cbor.dumps(seed)
     for i in range(1, 1000):
         buf = hmac.new(seed, b'Root Seed Chain %d' % i, hashlib.sha512).digest()
-        seed, chaincode = buf[:32], buf[32:]
-        result = cbits.encrypted_from_secret(passphase, seed, chaincode)
+        buf_l, buf_r = buf[:32], buf[32:]
+        result = cbits.encrypted_from_secret(passphase, buf_l, buf_r)
         if result:
             return result
 
@@ -149,9 +148,9 @@ def derive_key(xpriv, passphase, path, derivation_schema):
 
 
 def derive_address(xpriv, passphase, path, derivation_schema):
+    hdpass = derive_hdpassphase(xpriv_to_xpub(xpriv))
     xpriv = derive_key(xpriv, passphase, path, derivation_schema)
-    xpub = xpriv_to_xpub(xpriv)
-    return hd_addr(xpub, path, derive_hdpassphase(xpub))
+    return hd_addr(xpriv_to_xpub(xpriv), path, hdpass)
 
 
 def bip44_derive_address(xpriv, passphase, derivation_schema, account, change, index):
@@ -213,9 +212,9 @@ def test_encode_address(words, passphase):
     print('wallet id', base58.b58encode(encode_addr(addr)).decode())
     print('wallet id[short]', base58.b58encode(encode_addr_short(addr)).decode())
     path = [FIRST_HARDEN_INDEX, FIRST_HARDEN_INDEX]
-    addr = derive_address(root_xpriv, passphase, path, DERIVATION_V1)
+    addr = derive_address(root_xpriv, passphase, path, cbits.DERIVATION_V1)
     print('first address', base58.b58encode(encode_addr(addr)).decode())
-    addr = derive_address(root_xpriv, passphase, path, DERIVATION_V1)
+    addr = derive_address(root_xpriv, passphase, path, cbits.DERIVATION_V1)
     print('first address[short]', base58.b58encode(encode_addr_short(addr)).decode())
     print('decode', decode_addr(encode_addr(addr)))
     print('decode[short]', decode_addr(encode_addr_short(addr)))
