@@ -9,7 +9,6 @@ https://cardanodocs.com/technical/protocols/network-transport/
 import struct
 import enum
 import uuid
-import socket
 
 import cbor
 from recordclass import recordclass
@@ -149,6 +148,18 @@ class RemoteEndPoint(object):
 
             self.probing_thread = None
 
+        def __str__(self):
+            return '<RemoteEndPoint.Valid ' \
+                   'outgoing:%d ' \
+                   'next_light_id:%d ' \
+                   'last_incoming:%d ' \
+                   'len(incomings):%d>' % (
+                       self.outgoing,
+                       self.next_light_id,
+                       self.last_incoming,
+                       len(self.incomings)
+                   )
+
         def gen_next_light_id(self):
             n = self.next_light_id
             self.next_light_id += 1
@@ -195,15 +206,26 @@ class RemoteEndPoint(object):
         if isinstance(self._state, RemoteEndPoint.Valid):
             return self._state
 
-    def resolve_init(self, st):
-        'leaving init state, notify other listeners.'
-        assert isinstance(self._state, RemoteEndPoint.Init), \
+    def resolve(self, st):
+        'Leaving init/closing state, notify other listeners.'
+        assert isinstance(self._state, (RemoteEndPoint.Init, RemoteEndPoint.Closing)), \
             'invalid state' + str(self._state)
         evt = self._state.evt_resolve
         if isinstance(st, RemoteEndPoint.Closed):
-            del self.local._remotes[self._addr]
+            del self.local.valid_state._remotes[self._addr]
         self._state = st
         evt.set()
+
+    def closing(self):
+        'from Valid to Closing'
+        assert isinstance(self._state, RemoteEndPoint.Valid)
+        self._state = RemoteEndPoint.Closing(gevent.event.Event(), self._state)
+
+    def closed(self):
+        'from Valid to Closed'
+        assert isinstance(self._state, RemoteEndPoint.Valid)
+        del self.local.valid_state._remotes[self._addr]
+        self._state = RemoteEndPoint.Closed()
 
 
 class LocalEndPoint(object):
@@ -335,15 +357,37 @@ class LocalEndPoint(object):
                         st = remote.state.valid_state
                         st.incomings.add(lid)
                         st.last_incoming = lid
-                        remote.resolve_init(st)
+                        remote.resolve(st)
                     q.put(Event.ConnectionOpened(connection_id(remote.id, lid),
                           remote.addr))
                 elif cmd == ControlHeader.CloseConnection:
-                    connid = connection_id(remote.id, unpack_u32(stream.read(4)))
-                    q.put(Event.ConnectionClosed(connid))
+                    lid = unpack_u32(stream.read(4))
+                    st = remote.valid_state
+                    st.incomings.remove(lid)
+                    q.put(Event.ConnectionClosed(connection_id(remote.id, lid)))
+                    # if not st.incomings and st.outgoing == 0:
+                    #     # TODO should CloseSocket again?
+                    #     print('hanging connection?')
                 elif cmd == ControlHeader.CloseSocket:
-                    # q.put((cmd, unpack_u32(stream.read(4))))
-                    pass
+                    last_received = unpack_u32(stream.read(4))
+                    st = remote.state
+                    if isinstance(st, RemoteEndPoint.Valid):
+                        last_sent = st.next_light_id - 1 \
+                            if st.next_light_id > LIGHT_ID_MIN \
+                            else 0
+                        assert not bool(st.incomings)
+                        if st.outgoing == 0 and last_received == last_sent:
+                            # send back CloseSocket.
+                            st.socket.sendall(
+                                pack_u32(ControlHeader.CloseSocket) +
+                                pack_u32(st.last_incoming)
+                            )
+                            st.socket.close()
+                            remote.closed()
+                    else:
+                        assert isinstance(st, RemoteEndPoint.Closing)
+                        st.valid_state.socket.close()
+                        remote.resolve(RemoteEndPoint.Closed())
                 elif cmd == ControlHeader.CloseEndPoint:
                     q.put(Event.EndpointClosed())
                 elif cmd == ControlHeader.ProbeSocket:
@@ -372,23 +416,23 @@ class LocalEndPoint(object):
             try:
                 sock, result = endpoint_connect(addr, local_addr)
             except gevent.socket.error as e:
-                remote.resolve_init(RemoteEndPoint.Error('connect error: ' + str(e)))
+                remote.resolve(RemoteEndPoint.Error('connect error: ' + str(e)))
             else:
                 if result == HandshakeResponse.Accepted:
                     gevent.spawn(self.process_messages_loop, sock, remote)
-                    remote.resolve_init(RemoteEndPoint.Valid(sock, 'us'))
+                    remote.resolve(RemoteEndPoint.Valid(sock, 'us'))
                 elif result == HandshakeResponse.Crossed:
                     print('connection crossed, close our connection to', addr.decode())
                     if isinstance(remote.state, RemoteEndPoint.Init):
                         # Remote connection request has not came yet, remove the endpoint.
-                        remote.resolve_init(RemoteEndPoint.Closed())
+                        remote.resolve(RemoteEndPoint.Closed())
                         sock.close()
                     else:
                         # Remote connection already arrived, then re-use the connection.
                         assert isinstance(remote.state, RemoteEndPoint.Valid)
                         sock.close()
                 else:
-                    remote.resolve_init(RemoteEndPoint.Closed())
+                    remote.resolve(RemoteEndPoint.Closed())
                     sock.close()
 
         # create lightweight connection.
@@ -447,7 +491,8 @@ class Connection(object):
             remote_st.socket.sendall(
                 pack_u32(ControlHeader.CloseSocket) + pack_u32(remote_st.last_incoming)
             )
-            remote_st.socket.close()
+            # enter closing state, maybe there is incoming connection on the way.
+            self._remote.closing()
 
     def send(self, buf):
         assert self._alive, 'send to an inactive connection.'
@@ -544,7 +589,7 @@ class Transport(object):
                 if st:
                     st.start_probing()
             else:
-                remote.resolve_init(RemoteEndPoint.Valid(sock, 'them'))
+                remote.resolve(RemoteEndPoint.Valid(sock, 'them'))
 
                 # send success response
                 sock.sendall(pack_u32(HandshakeResponse.Accepted))

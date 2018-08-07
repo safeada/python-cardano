@@ -34,3 +34,76 @@ Concurrently Connect
 * Thread 2 try to connect to A, find RemoteEndPoint exists, wait for evt_resolve Event.
 * Thread 1 finish connecting, notify evt_resolve Event.
 * Thread 2 retry, reuse the established connection.
+
+Closing Connection
+------------------
+
+* B send CreateConnection to A [1]
+  * increase last_sent
+  * increase outgoing
+
+* A close last connection to B [2]
+  * RemoteEndPoint enter Closing state.
+  * send CloseSocket msg to B
+
+* A create connection to B [3]
+  * state = RemoteEndPointB (Closing)
+  * wait for closing Event and retry.
+
+* A received CreateConnection from B [4]
+  * A is in Closing state, recover to valid state.
+  * increase last_incoming
+
+* B received CloseSocket from A
+  * A.last_incoming != B.last_sent
+  * just ignore it.
+
+Closing Connection
+------------------
+
+* A send create connection 
+  * increase outgoing and last_sent
+
+* A send close connection 
+  * decrease outgoing
+
+* A send CloseSocket to B
+  * enter Closing state.
+
+* B send CloseSocket to A
+
+* A receive CloseSocket
+  * last_received != last_sent
+
+Closing Connection
+------------------
+
+* A connect B
+  A.next_lid = 1025
+  A.outgoing = 1
+
+* B connect A
+  B.next_lid = 1025
+  B.outgoing = 1
+
+* A close connect
+  send close connection to B
+  A.outgoing = 0
+  send CloseSocket to B (last_incoming=1024)
+  enter Closing
+
+* B close connect
+  send close connection to A
+  B.outgoing = 0
+  send CloseSocket to A (last_incoming=1024)
+  enter Closing
+
+* B got connect from A
+  recover from Closing state.
+  incomings.add(1024)
+
+* B got close connect from A
+  incomings.remove(1024)
+
+* A got connect from B
+  recover from Closing state.

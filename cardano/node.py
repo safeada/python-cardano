@@ -71,11 +71,13 @@ class Conversation(object):
 
     def receive(self, *args):
         o = self._queue.get(*args)
-        if o != StopIteration:
+        if o == StopIteration:
+            # closed by remote
+            if self._conn.alive:
+                self._conn.close()
+            self._queue = None
+        else:
             return o
-
-        # closed.
-        self._queue = None
 
     def closed(self):
         return self._conn.alive
@@ -83,12 +85,6 @@ class Conversation(object):
     def close(self):
         'close by us.'
         self._conn.close()
-
-    def on_close(self):
-        'close by remote.'
-        if self._conn.alive:
-            self._conn.close()
-        self._queue.put(StopIteration)
 
 
 class Node(object):
@@ -101,7 +97,7 @@ class Node(object):
         # The first connect request send peer data, other concurrent requests need to wait
         # addr -> state (None | 'done' | Event)
         self._peer_sending = {}
-        # Received peer_data, addr -> peer_data
+        # Received peer_data, addr -> (peer_data, set of connid)
         self._peer_received = {}
 
         # Address of incoming connections, connid -> addr
@@ -162,7 +158,7 @@ class Node(object):
             self._wait_for_queue.pop((nonce, addr))
             conn.close()
             raise
-        return Conversation(conn, queue, addr, self._peer_received[addr])
+        return Conversation(conn, queue, addr, self._peer_received[addr][0])
 
     def dispatcher(self):
         ep = self._endpoint
@@ -177,7 +173,7 @@ class Node(object):
                 if addr not in self._peer_received:
                     # not received peerdata yet, assuming this is it.
                     print('received remote peer data')
-                    self._peer_received[addr] = cbor.loads(ev.data)
+                    self._peer_received[addr] = (cbor.loads(ev.data), set([ev.connid]))
                     continue
 
                 nonce = self._incoming_nonce.get(ev.connid)
@@ -199,7 +195,12 @@ class Node(object):
                     # normal data.
                     self._incoming_queues[ev.connid].put(ev.data)
             elif tp == Event.ConnectionClosed:
-                self._incoming_addr.pop(ev.connid)
+                addr = self._incoming_addr.pop(ev.connid)
+                _, connset = self._peer_received[addr]
+                connset.remove(ev.connid)
+                if not connset:
+                    self._peer_received.pop(addr)
+
                 self._incoming_nonce.pop(ev.connid, None)
                 queue = self._incoming_queues.pop(ev.connid, None)
                 if queue:
@@ -212,7 +213,7 @@ class Node(object):
         # Will use the exist tcp connection.
         conn = self._connect_peer(addr)
         conn.send(b'A' + struct.pack('>Q', nonce))
-        conv = Conversation(conn, queue, addr, self._peer_received[addr])
+        conv = Conversation(conn, queue, addr, self._peer_received[addr][0])
 
         # run listener.
         try:
