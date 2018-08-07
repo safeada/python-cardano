@@ -15,6 +15,7 @@ ext_modules = [Extension("cardano.cbits", sources=[
     "cbits/cryptonite_sha1.c",
     "cbits/cryptonite_sha256.c",
     "cbits/cryptonite_sha512.c",
+    "cbits/cryptonite_poly1305.c",
 ], include_dirs=["cbits", "cbits/ed25519"])]
 cmdclass = {'build_ext': build_ext}
 

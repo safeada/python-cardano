@@ -19,7 +19,6 @@ from mnemonic import Mnemonic
 import cbor
 import pbkdf2
 import base58
-from tlslite.utils.chacha20_poly1305 import CHACHA20_POLY1305
 
 from . import cbits
 from .cbits import DERIVATION_V1
@@ -55,14 +54,13 @@ def derive_hdpassphase(xpub):
 def pack_addr_payload(path, hdpass):
     'packHDAddressAttr'
     plaintext = cbor.dumps(cbor.VarList(path))
-    cipher = CHACHA20_POLY1305(hdpass, 'python').seal(b'serokellfore', plaintext, b'')
-    return bytes(cipher)
+    return cbits.encrypt_chachapoly(b'serokellfore', hdpass, b'', plaintext)
 
 
 def unpack_addr_payload(ciphertext, hdpass):
-    plaintext = CHACHA20_POLY1305(hdpass, 'python').open(b'serokellfore', ciphertext, b'')
+    plaintext = cbits.decrypt_chachapoly(b'serokellfore', hdpass, b'', ciphertext)
     if plaintext:
-        return cbor.loads(bytes(plaintext))
+        return cbor.loads(plaintext)
 
 
 def root_addr(xpub):
@@ -191,6 +189,14 @@ def recover_from_storage(store, hdpass):
     return recover_from_blocks(store.blocks_rev(), hdpass)
 
 
+def recover_utxo_from_storage(store, hdpass):
+    result = {}
+    for txin, txout in store.iter_utxo():
+        if get_derive_path(txout.addr, hdpass):
+            result[txin] = txout
+    return result
+
+
 def verify_address(addr, xpub):
     'verify address with pubkey'
     addr_hash, attrs, addr_type = decode_addr(addr)
@@ -220,17 +226,18 @@ def test_encode_address(words, passphase):
 
 def test_recover(dbpath, words, passphase):
     from .storage import Storage
-    store = Storage(dbpath)
+    store = Storage(dbpath, readonly=True)
 
     root_xpriv = gen_root_xpriv(mnemonic_to_seed(words), passphase)
     hdpass = derive_hdpassphase(xpriv_to_xpub(root_xpriv))
-    print(recover_from_storage(store, hdpass))
+    # print(recover_from_storage(store, hdpass))
+    print(recover_utxo_from_storage(store, hdpass))
 
 
 if __name__ == '__main__':
-    import sys
     import getpass
     passphase = getpass.getpass('Input passphase:').encode()
     words = 'ring crime symptom enough erupt lady behave ramp apart settle citizen junk'
     # test_encode_address(words, passphase)
+    import sys
     test_recover(sys.argv[1], words, passphase)
