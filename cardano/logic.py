@@ -45,6 +45,8 @@ class GetBlocks(Worker):
             if tag == 0:  # MsgBlock
                 yield DecodedBlock(data, buf[2:])
 
+    def one(self, h):
+        return next(self(h, h))
 
 class StreamBlocks(Worker):
     message_type = Message.Stream

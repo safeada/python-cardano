@@ -138,8 +138,7 @@ class BlockRetriever(object):
     def _single_block(self, addr, h):
         print('request single block')
         w = self.node.worker(Message.GetBlocks, addr)
-        blk = next(w(h, h))
-        self._handle_blocks([blk])
+        self._handle_blocks([w.one(h)])
 
     def _update_last_known_header(self, header):
         # update last known header

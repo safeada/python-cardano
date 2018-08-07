@@ -158,7 +158,7 @@ class Storage(object):
         current_hash = self.genesis_block_hash()
         while True:
             raw = self.db.get(b'b/' + current_hash)
-            yield DecodedBlockHeader(cbor.loads(raw), raw)
+            yield DecodedBlockHeader.from_raw(raw, current_hash)
             current_hash = self.db.get(b'e/fl/' + current_hash)
             if not current_hash:
                 break
@@ -166,7 +166,7 @@ class Storage(object):
     def blockheaders_noorder(self):
         'Iterate block header in rocksdb order, fastest.'
         return map(
-            lambda _, raw: DecodedBlockHeader(cbor.loads(raw), raw),
+            lambda t: DecodedBlockHeader.from_raw(t[1], t[0][2:]),
             iter_prefix(self.db, b'b/')
         )
 
