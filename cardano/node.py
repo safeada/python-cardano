@@ -11,7 +11,7 @@ import gevent
 import gevent.event
 
 from .transport import Event, RemoteEndPoint
-from .constants import WAIT_TIMEOUT, PROTOCOL_MAGIC
+from .constants import PROTOCOL_MAGIC
 
 
 class Message(enum.IntEnum):
@@ -158,12 +158,7 @@ class Node(object):
         # wait for ack and receiving queue.
         evt = gevent.event.AsyncResult()
         self._wait_for_queue[(nonce, addr)] = evt
-        try:
-            queue = evt.get(timeout=WAIT_TIMEOUT)
-        except gevent.Timeout:
-            self._wait_for_queue.pop((nonce, addr))
-            conn.close()
-            raise
+        queue = evt.get()
         return Conversation(self, conn, queue, addr)
 
     def dispatcher(self):
