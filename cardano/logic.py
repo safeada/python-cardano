@@ -52,29 +52,41 @@ class GetBlocks(Worker):
 class StreamBlocks(Worker):
     message_type = Message.Stream
 
+    def __init__(self, *args, **kwargs):
+        super(StreamBlocks, self).__init__(*args, **kwargs)
+        self._ended = False
+
+    @property
+    def ended(self):
+        return self._ended
+
     def start(self, from_, to, n):
+        self._ended = False
         self.conv.send(cbor.dumps([
             0,
-            [0, cbor.VarList(from_), to, n]
+            [cbor.VarList(from_), to, n]
         ]))
-        yield from self._receive_stream()
+        yield from self._receive_stream(n)
 
     def update(self, n):
+        assert not self._ended
         self.conv.send(cbor.dumps([
             1,
-            [0, n]
+            [n]
         ]))
-        yield from self._receive_stream()
+        yield from self._receive_stream(n)
 
-    def _receive_stream(self):
-        while True:
+    def _receive_stream(self, n):
+        for i in range(n):
             buf = self.conv.receive()
             if not buf:
                 # closed by remote.
+                self._ended = True
                 print('connection closed')
                 break
             tag, data = cbor.loads(buf)  # \x82, \x00, block_raw_data
             if tag != 0:
+                self._ended = True
                 print('stream ended', tag, data)
                 break
             yield DecodedBlock(data, buf[2:])

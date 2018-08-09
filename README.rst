@@ -85,7 +85,6 @@ TODOs
 
 * wallet state storage, a simple solution first, hopefully something like Haskell's acid-state in the end.
 * block verification.
-* handle incoming block headers, handle forks.
 * relay block data with stream api.
 * wallet cli app.
 * wallet V1 api and api for SPV light client.

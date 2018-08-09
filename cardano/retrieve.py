@@ -3,6 +3,7 @@ import gevent.event
 
 from .node import Message
 from .utils import get_current_slot
+from .constants import STREAM_WINDOW
 
 
 def classify_new_header(tip_header, header):
@@ -102,36 +103,41 @@ class BlockRetriever(object):
             self._set_recovery_task(addr, header)
 
     def _handle_blocks(self, blocks):
+        header = None
         if self._recovery:
             _, header = self._recovery
-            target_difficulty = header.difficulty()
-            if any(blk.header().difficulty() >= target_difficulty for blk in blocks):
-                print('exit recovering')
-                self._recovery = None
 
         for blk in blocks:
             self.store.append_block(blk)
+            if header is not None:
+                # print progress
+                progress = blk.header().difficulty() / header.difficulty()
+                print('Syncing... %f%%' % (progress * 100), end='\r')
+                if progress >= 1:
+                    print('exit recovering')
+                    self._recovery = None
+                    header = None
 
     def _batch_blocks(self, addr, checkpoints, head):
         # TODO classify headers
         print('request batch blocks')
         w_headers = self.node.worker(Message.GetHeaders, addr)
         headers = w_headers(checkpoints, head)
-        print('got headers', len(headers))
         if not headers:
             return
         assert headers[-1].prev_header() == self.store.tip(), 'Don\'t support forks yet.'
         w_blocks = self.node.worker(Message.GetBlocks, addr)
         blocks = list(w_blocks(headers[-1].hash(), headers[0].hash()))
-        print('got blocks', len(blocks))
         self._handle_blocks(blocks)
 
     def _stream_blocks(self, addr, checkpoints, head):
         # get blocks [tip] header
         worker = self.node.worker(Message.Stream, addr)
         if worker:
-            # stream mode
-            pass
+            print('request stream blocks')
+            self._handle_blocks(worker.start(checkpoints, head, STREAM_WINDOW))
+            while not worker.ended:
+                self._handle_blocks(worker.update(STREAM_WINDOW))
         else:
             self._batch_blocks(addr, checkpoints, head)
 

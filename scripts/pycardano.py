@@ -17,10 +17,10 @@ from cardano.storage import Storage, iter_prefix, remove_prefix
 from cardano.node import Message
 from cardano.logic import LogicNode
 from cardano.address import (
-    derive_hdpassphase, xpriv_to_xpub, get_derive_path, DERIVATION_V1,
+    derive_hdpassphase, xpriv_to_xpub, get_derive_path,
     derive_key, verify_address, mnemonic_to_seed, gen_root_xpriv
 )
-from cardano.cbits import encrypted_sign, verify
+from cardano.cbits import encrypted_sign, verify, DERIVATION_V1
 from cardano import config
 
 def input_passphase():

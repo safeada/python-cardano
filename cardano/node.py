@@ -174,6 +174,8 @@ class Node(object):
             if tp == Event.ConnectionOpened:
                 assert ev.connid not in self._incoming_addr, 'duplicate connection id.'
                 self._incoming_addr[ev.connid] = ev.addr
+                if ev.addr in self._peer_received:
+                    self._peer_received[ev.addr][1].add(ev.connid)
             elif tp == Event.Received:
                 addr = self._incoming_addr[ev.connid]
                 if addr not in self._peer_received:
