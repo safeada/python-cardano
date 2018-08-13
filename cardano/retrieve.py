@@ -68,7 +68,7 @@ class BlockRetriever(object):
     def status(self):
         'syncing: return sync progress; not syncing: return None'
         if self._recovery:
-            local = self.store.blockheader(self.store.tip()).difficulty()
+            local = self.store.tip().difficulty()
             net = self.last_known_header.difficulty()
             return local / net
 
@@ -88,12 +88,12 @@ class BlockRetriever(object):
         self.event.set()
 
     def _handle_recovery_task(self, addr, header):
-        tip_header = self.store.blockheader(self.store.tip())
+        tip_header = self.store.tip()
         # TODO proper checkpoints
         self._stream_blocks(addr, [tip_header.hash()], header.hash())
 
     def _handle_retrieval_task(self, addr, header):
-        tip_header = self.store.blockheader(self.store.tip())
+        tip_header = self.store.tip()
         result = classify_new_header(tip_header, header)
         if result is True:
             # continuation, get a single block.
@@ -125,7 +125,8 @@ class BlockRetriever(object):
         headers = w_headers(checkpoints, head)
         if not headers:
             return
-        assert headers[-1].prev_header() == self.store.tip(), 'Don\'t support forks yet.'
+        assert headers[-1].prev_header() == self.store.tip().hash(), \
+            'Don\'t support forks yet.'
         w_blocks = self.node.worker(Message.GetBlocks, addr)
         blocks = list(w_blocks(headers[-1].hash(), headers[0].hash()))
         self._handle_blocks(blocks)

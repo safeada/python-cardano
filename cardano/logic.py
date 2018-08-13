@@ -214,9 +214,10 @@ class LogicNode(Node):
     def _trigger_recovery_worker(self, lag_behind):
         while True:
             triggered = False
+            slot_diff = 0
             if not self.retriever.recovering():
                 cur_slot = get_current_slot()
-                tip_slot = self.store.blockheader(self.store.tip()).slot()
+                tip_slot = self.store.tip().slot()
                 slot_diff = flatten_slotid(cur_slot) - flatten_slotid(tip_slot)
                 if slot_diff >= lag_behind:
                     # need to recovery.

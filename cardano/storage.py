@@ -47,7 +47,7 @@ class Storage(object):
         self._root_path = root_path
         opt = rocksdb.Options(create_if_missing=True)
         self.db = rocksdb.DB(os.path.join(self._root_path, 'db'), opt, readonly)
-        self._tip = None  # cache current tip in memory.
+        self._tip = None  # cache current tip header in memory.
 
         # cache recent used epoch db.
         self._current_epoch_db = None
@@ -68,20 +68,21 @@ class Storage(object):
 
     def tip(self):
         if not self._tip:
-            self._tip = self.db.get(b'c/tip')
+            h = self.db.get(b'c/tip')
+            self._tip = self.blockheader(h)
         return self._tip
 
-    def set_tip(self, s, batch=None):
-        self._tip = s
-        (batch or self.db).put(b'c/tip', s)
+    def set_tip(self, hdr, batch=None):
+        self._tip = hdr
+        (batch or self.db).put(b'c/tip', hdr.hash())
 
     def genesis_block_hash(self):
         return self.open_epoch_db(0).get(b'genesis')
 
-    def blockheader(self, hash):
-        buf = self.db.get(b'b/' + hash)
+    def blockheader(self, h):
+        buf = self.db.get(b'b/' + h)
         if buf:
-            return DecodedBlockHeader.from_raw(buf, hash)
+            return DecodedBlockHeader.from_raw(buf, h)
 
     def block(self, hdr):
         db = self.open_epoch_db(hdr.slot()[0], readonly=True)
@@ -91,7 +92,7 @@ class Storage(object):
 
     def blocks_rev(self, start_hash=None):
         'Iterate blocks backwardly.'
-        current_hash = start_hash or self.tip()
+        current_hash = start_hash or self.tip().hash()
         current_epoch = self.blockheader(current_hash).slot()[0]
         current_epoch_db = self.open_epoch_db(current_epoch, readonly=True)
         while True:
@@ -145,7 +146,7 @@ class Storage(object):
 
     def blockheaders_rev(self):
         'Iterate block header backwardly.'
-        current_hash = self.tip()
+        current_hash = self.tip().hash()
         while True:
             raw = self.db.get(b'b/' + current_hash)
             if not raw:
@@ -175,21 +176,21 @@ class Storage(object):
         batch = rocksdb.WriteBatch()
 
         # check prev_hash
-        tip = self.tip()
+        tip = self.tip().hash()
         if tip:
             assert hdr.prev_header() == tip, 'invalid block.'
 
-        hash = hdr.hash()
-        batch.put(b'b/' + hash, hdr.raw())
-        batch.put(b'e/fl/' + hdr.prev_header(), hash)
+        h = hdr.hash()
+        batch.put(b'b/' + h, hdr.raw())
+        batch.put(b'e/fl/' + hdr.prev_header(), h)
         self.utxo_apply_block(block, batch)
-        self.set_tip(hash, batch)
+        self.set_tip(hdr, batch)
         self.db.write(batch)
 
         # write body
         epoch, _ = hdr.slot()
         db = self.open_epoch_db(epoch, readonly=False)
-        db.put(hash, block.raw())
+        db.put(h, block.raw())
 
     def utxo_apply_block(self, block, batch):
         txins, utxo = block.utxos()

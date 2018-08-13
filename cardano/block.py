@@ -25,7 +25,9 @@ class DecodedBase(object):
         return self._raw or cbor.dumps(self.data)
 
     def hash(self):
-        return self._hash or hash_serialized(self.raw())
+        if not self._hash:
+            self._hash = hash_serialized(self.raw())
+        return self._hash
 
 
 class DecodedBlockHeader(DecodedBase):
@@ -54,6 +56,10 @@ class DecodedBlockHeader(DecodedBase):
         else:
             n, = self.data[1][3][2]
         return n
+
+    def tx_count(self):
+        if not self.is_genesis():
+            return self.data[1][2][0][0]
 
 
 class DecodedTransaction(DecodedBase):
@@ -92,7 +98,7 @@ class DecodedBlock(DecodedBase):
         from .wallet import TxIn
         txins = set()
         utxo = {}
-        # Process in reversed order, so we can remote inputs spent by current block.
+        # Process in reversed order, so we can remove inputs spent by current block.
         for t in reversed(self.transactions()):
             tx = t.tx()
             for idx, txout in enumerate(tx.outputs):
