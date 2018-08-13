@@ -183,21 +183,29 @@ class LogicNode(Node):
         self.store = store
 
         # start worker threads
+        self._parent_thread = gevent.getcurrent()
 
         # block retriever
         from .retrieve import BlockRetriever
         self.retriever = BlockRetriever(self.store, self)
         self.retriever_thread = gevent.spawn(self.retriever)
+        self.retriever_thread.link(self._handle_worker_exit)
 
         # recover trigger
         self.trigger_recovery_thread = gevent.spawn(
             self._trigger_recovery_worker,
             config.SECURITY_PARAMETER_K * 2
         )
+        self.trigger_recovery_thread.link(self._handle_worker_exit)
 
         # dns subscribe worker
         self._peers = gevent.event.AsyncResult()  # set of peer addresses
         self.subscribe_thread = gevent.spawn(self._subscribe, [config.MAINCHAIN_ADDR])
+        self.subscribe_thread.link(self._handle_worker_exit)
+
+    def _handle_worker_exit(self, t):
+        print('worker thread exit unexpected')
+        gevent.kill(self._parent_thread)
 
     def _trigger_recovery(self):
         'trigger recovery actively by requesting tip'
