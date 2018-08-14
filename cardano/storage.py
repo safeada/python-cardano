@@ -90,6 +90,12 @@ class Storage(object):
         if buf:
             return DecodedBlock(cbor.loads(buf), buf)
 
+    def genesis_block(self, epoch):
+        db = self.open_epoch_db(epoch, readonly=True)
+        h = db.get(b'genesis')
+        assert h, 'epoch not exist: %d' % epoch
+        return DecodedBlock.from_raw(db.get(h))
+
     def blocks_rev(self, start_hash=None):
         'Iterate blocks backwardly.'
         current_hash = start_hash or self.tip().hash()
@@ -190,6 +196,9 @@ class Storage(object):
         # write body
         epoch, _ = hdr.slot()
         db = self.open_epoch_db(epoch, readonly=False)
+        if hdr.is_genesis():
+            assert not db.get(b'genesis')
+            db.put(b'genesis', h)
         db.put(h, block.raw())
 
     def utxo_apply_block(self, block, batch):
