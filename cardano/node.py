@@ -11,7 +11,7 @@ import gevent
 import gevent.event
 
 from .transport import Event, RemoteEndPoint
-from .constants import PROTOCOL_MAGIC
+from . import config
 
 
 class Message(enum.IntEnum):
@@ -37,7 +37,7 @@ MessageSndRcv = {
 
 
 def make_peer_data(workers, listeners):
-    peer_data = [PROTOCOL_MAGIC, [0, 1, 0], {}, {}]
+    peer_data = [config.PROTOCOL_MAGIC, [0, 1, 0], {}, {}]
     for cls in workers:
         peer_data[3][cls.message_type] = [
             0,
@@ -254,7 +254,6 @@ def default_node(ep):
 
 if __name__ == '__main__':
     from .transport import Transport
-    from . import config
     node = default_node(Transport().endpoint())
     worker = node.worker(Message.Subscribe, config.MAINCHAIN_ADDR)
     # send subscribe

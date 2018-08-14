@@ -9,6 +9,8 @@ We also try to cache raw data, to prevent re-serialization.
 '''
 import cbor
 from .utils import hash_serialized, hash_data
+from .address import addr_hash
+from . import config
 
 
 class DecodedBase(object):
@@ -61,6 +63,16 @@ class DecodedBlockHeader(DecodedBase):
         if not self.is_genesis():
             return self.data[1][2][0][0]
 
+    def protocol_magic(self):
+        return self.data[1][0]
+
+    def leader_key(self):
+        assert not self.is_genesis()
+        return self.data[1][3][1]
+
+    def unknowns(self):
+        return self.data[1][4][2]
+
 
 class DecodedTransaction(DecodedBase):
     def tx(self):
@@ -83,11 +95,9 @@ class DecodedBlock(DecodedBase):
         return self.data[0] == 0
 
     def transactions(self):
-        if self.is_genesis():
-            return []
-        else:
-            # GenericBlock -> MainBody -> [(Tx, TxWitness)]
-            return [DecodedTransaction(tx) for tx, _ in self.data[1][1][0]]
+        assert not self.is_genesis()
+        # GenericBlock -> MainBody -> [(Tx, TxWitness)]
+        return [DecodedTransaction(tx) for tx, _ in self.data[1][1][0]]
 
     def txs(self):
         'Transaction list in wallet format.'
@@ -109,3 +119,85 @@ class DecodedBlock(DecodedBase):
             for txin in tx.inputs:
                 txins.add(txin)
         return txins, utxo
+
+    def unknowns(self):
+        return self.data[1][2][0]
+
+    def leaders(self):
+        assert self.is_genesis()
+        return self.data[1][1]
+
+
+class VerifyException(Exception):
+    pass
+
+
+def verify_header(
+        hdr,
+        protocol_magic,
+        header_no_unknown=False,
+        prev_header=None,
+        current_slot=None,
+        leaders=None,
+        max_header_size=None):
+    if hdr.protocol_magic() != config.PROTOCOL_MAGIC:
+        raise VerifyException('protocol magic')
+
+    if prev_header is not None:
+        if hdr.prev_header() != prev_header.hash():
+            raise VerifyException('prev header hash')
+        if hdr.difficulty() != prev_header.difficulty() + (0 if hdr.is_genesis() else 1):
+            raise VerifyException('prev header difficulty')
+        if hdr.slot() <= prev_header.slot():
+            raise VerifyException('prev header slot')
+        if not hdr.is_genesis() and hdr.slot()[0] != prev_header.slot()[0]:
+            raise VerifyException('prev header epoch')
+
+    if current_slot is not None and hdr.slot() > current_slot:
+        raise VerifyException('slot in future')
+
+    if leaders is not None and not hdr.is_genesis() and \
+            leaders[hdr.slot()[1]] != addr_hash(hdr.leader_key()):
+        raise VerifyException('leader')
+
+    if header_no_unknown and hdr.unknowns():
+        raise VerifyException('extra header data')
+
+
+def verify_block(
+        blk,
+        protocol_magic,
+        max_block_size=None,
+        body_no_unknown=False,
+        **kwargs):
+    verify_header(blk.header(), protocol_magic, **kwargs)
+
+    if max_block_size is not None and len(blk.raw()) > max_block_size:
+        raise VerifyException('block size')
+
+    if body_no_unknown and blk.unknowns():
+        raise VerifyException('extra block data')
+
+
+def verify_blocks(blks):
+    pass
+
+
+if __name__ == '__main__':
+    from .storage import Storage
+    from .utils import get_current_slot
+    store = Storage('test_db')
+    hdr = store.tip()
+    blk = store.block(hdr)
+    prev_header = store.blockheader(blk.header().prev_header())
+    print(hdr.slot())
+    genesis = store.genesis_block(hdr.slot()[0])
+    print(genesis.leaders())
+    print(blk.unknowns(), hdr.unknowns())
+    verify_block(blk, config.PROTOCOL_MAGIC,
+                 max_block_size=config.MAX_BLOCK_SIZE,
+                 body_no_unknown=True,
+                 header_no_unknown=True,
+                 current_slot=get_current_slot(),
+                 prev_header=prev_header,
+                 leaders=genesis.leaders())
