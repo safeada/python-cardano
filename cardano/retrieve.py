@@ -4,6 +4,8 @@ import gevent.event
 from .node import Message
 from .utils import get_current_slot
 from .constants import STREAM_WINDOW
+from .block import verify_header
+from . import config
 
 
 def classify_new_header(tip_header, header):
@@ -16,16 +18,17 @@ def classify_new_header(tip_header, header):
     if hdr_slot > current_slot:
         print('new header is for future slot')
         return  # future slot
-    if hdr_slot <= tip_header.slot():
+    if tip_header and hdr_slot <= tip_header.slot():
         print('new header slot not advanced than tip')
         return
 
-    if header.prev_header() == tip_header.hash():
-        # TODO verify new header
+    tip_hash = tip_header.hash() if tip_header else config.MAINCHAIN_GENESIS
+    if header.prev_header() == tip_hash:
+        verify_header(header, prev_header=tip_header, slot=current_slot)
         return True  # is's a continuation
     else:
         # check difficulty
-        if header.difficulty() > tip_header.difficulty():
+        if not tip_header or header.difficulty() > tip_header.difficulty():
             # longer alternative chain.
             return False
 
@@ -89,8 +92,9 @@ class BlockRetriever(object):
 
     def _handle_recovery_task(self, addr, header):
         tip_header = self.store.tip()
+        checkpoints = [tip_header.hash() if tip_header else config.MAINCHAIN_GENESIS]
         # TODO proper checkpoints
-        self._stream_blocks(addr, [tip_header.hash()], header.hash())
+        self._stream_blocks(addr, checkpoints, header.hash())
 
     def _handle_retrieval_task(self, addr, header):
         tip_header = self.store.tip()
@@ -101,6 +105,8 @@ class BlockRetriever(object):
         elif result is False:
             # alternative, enter recovery mode.
             self._set_recovery_task(addr, header)
+        else:
+            print('ignore header', header.difficulty())
 
     def _handle_blocks(self, blocks):
         header = None

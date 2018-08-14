@@ -69,7 +69,8 @@ class Storage(object):
     def tip(self):
         if not self._tip:
             h = self.db.get(b'c/tip')
-            self._tip = self.blockheader(h)
+            if h:
+                self._tip = self.blockheader(h)
         return self._tip
 
     def set_tip(self, hdr, batch=None):
@@ -182,9 +183,9 @@ class Storage(object):
         batch = rocksdb.WriteBatch()
 
         # check prev_hash
-        tip = self.tip().hash()
+        tip = self.tip()
         if tip:
-            assert hdr.prev_header() == tip, 'invalid block.'
+            assert hdr.prev_header() == tip.hash(), 'invalid block.'
 
         h = hdr.hash()
         batch.put(b'b/' + h, hdr.raw())

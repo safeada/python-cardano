@@ -225,7 +225,8 @@ class LogicNode(Node):
             slot_diff = 0
             if not self.retriever.recovering():
                 cur_slot = get_current_slot()
-                tip_slot = self.store.tip().slot()
+                tip = self.store.tip()
+                tip_slot = tip.slot() if tip else (0, 0)
                 slot_diff = flatten_slotid(cur_slot) - flatten_slotid(tip_slot)
                 if slot_diff >= lag_behind:
                     # need to recovery.
