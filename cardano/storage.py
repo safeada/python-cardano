@@ -190,7 +190,8 @@ class Storage(object):
         h = hdr.hash()
         batch.put(b'b/' + h, hdr.raw())
         batch.put(b'e/fl/' + hdr.prev_header(), h)
-        self.utxo_apply_block(block, batch)
+        if not block.is_genesis():
+            self.utxo_apply_block(block, batch)
         self.set_tip(hdr, batch)
         self.db.write(batch)
 

@@ -186,13 +186,12 @@ def verify_blocks(blks):
 if __name__ == '__main__':
     from .storage import Storage
     from .utils import get_current_slot
-    store = Storage('test_db')
+    store = Storage('test_db', readonly=True)
     hdr = store.tip()
     blk = store.block(hdr)
     prev_header = store.blockheader(blk.header().prev_header())
     print(hdr.slot())
     genesis = store.genesis_block(hdr.slot()[0])
-    print(genesis.leaders())
     print(blk.unknowns(), hdr.unknowns())
     verify_block(blk, config.PROTOCOL_MAGIC,
                  max_block_size=config.MAX_BLOCK_SIZE,

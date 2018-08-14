@@ -24,7 +24,8 @@ def classify_new_header(tip_header, header):
 
     tip_hash = tip_header.hash() if tip_header else config.MAINCHAIN_GENESIS
     if header.prev_header() == tip_hash:
-        verify_header(header, prev_header=tip_header, slot=current_slot)
+        verify_header(header, config.PROTOCOL_MAGIC,
+                      prev_header=tip_header, current_slot=current_slot)
         return True  # is's a continuation
     else:
         # check difficulty
