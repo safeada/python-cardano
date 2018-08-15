@@ -44,6 +44,8 @@ def remove_prefix(db, prefix):
 
 class Storage(object):
     def __init__(self, root_path, readonly=False):
+        if not os.path.exists(root_path):
+            os.makedirs(root_path)
         self._root_path = root_path
         opt = rocksdb.Options(create_if_missing=True)
         self.db = rocksdb.DB(os.path.join(self._root_path, 'db'), opt, readonly)

@@ -99,6 +99,11 @@ class BlockRetriever(object):
 
     def _handle_retrieval_task(self, addr, header):
         tip_header = self.store.tip()
+        if not tip_header:
+            print('retrieve genesis block')
+            b = self.node.worker(Message.GetBlocks, addr).one(config.MAINCHAIN_GENESIS)
+            self._handle_blocks([b])
+            tip_header = self.store.tip()
         result = classify_new_header(tip_header, header)
         if result is True:
             # continuation, get a single block.
