@@ -24,7 +24,9 @@ class DecodedBase(object):
         return cls(cbor.loads(raw), raw, hash)
 
     def raw(self):
-        return self._raw or cbor.dumps(self.data)
+        if not self._raw:
+            self._raw = cbor.dumps(self.data)
+        return self._raw
 
     def hash(self):
         if not self._hash:
