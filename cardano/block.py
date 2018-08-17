@@ -8,8 +8,13 @@ It's more efficient this way at most scenario.
 We also try to cache raw data, to prevent re-serialization.
 '''
 import cbor
+import base64
+import base58
+import binascii
+from collections import defaultdict
 from .utils import hash_serialized, hash_data
-from .address import addr_hash
+from .address import addr_hash, redeem_addr, decode_addr
+from .random import Random
 from . import config
 
 
@@ -185,20 +190,131 @@ def verify_blocks(blks):
     pass
 
 
+def genesis_block(prev_header, epoch, leaders):
+    'create genesis block'
+    return DecodedBlock([
+        0,
+        [[
+            config.PROTOCOL_MAGIC,
+            prev_header.hash(),
+            hash_data(leaders),
+            [epoch, prev_header.difficulty()],
+            {}
+        ], leaders],
+        {}
+    ])
+
+
+def avvm_pk(s):
+    s = s.replace('_', '/').replace('-', '+')
+    s = base64.b64decode(s)
+    assert len(s) == 32
+    return s
+
+
+def genesis_balances():
+    return [(redeem_addr(avvm_pk(k)), int(v))
+            for k, v in config.GENESIS['avvmDistr'].items()] + \
+        [(decode_addr(base58.b58decode(k)), int(v))
+         for k, v in config.GENESIS['nonAvvmBalances'].items()]
+
+
+def bootstrap_distr(c):
+    # bootstrap
+    stakeholders = config.GENESIS['bootStakeholders']
+    sum_weight = sum(stakeholders.values())
+    result = []
+    if c < sum_weight:
+        for holder, weight in stakeholders.items():
+            result.append((binascii.unhexlify(holder), min(c, weight)))
+            c -= weight
+            if c < 0:
+                break
+    else:
+        d, m = divmod(c, sum_weight)
+        stakes = [weight * d for _, weight in stakeholders.items()]
+        if m > 0:
+            ix = Random(hash_data(m)).number(len(stakeholders))
+            stakes[ix] += m
+        result = zip(map(binascii.unhexlify, stakeholders.keys()), stakes)
+
+    return result
+
+
+def addr_stakes(addr, c):
+    dist = addr.attrs.get(0)
+    if dist is None:
+        return bootstrap_distr(c)
+    else:
+        # TODO
+        assert False
+
+
+def genesis_stakes():
+    stakes = defaultdict(int)
+    for addr, c in genesis_balances():
+        for holder, n in addr_stakes(addr, c):
+            stakes[holder] += n
+    return stakes
+
+
+def fts(slotcount, seed, coinsum, stakelist):
+    'if stakelist is consistant with coinsum, no exception'
+    assert coinsum > 0
+
+    # generate coin indexes.
+    rnd = Random(seed)
+    indices = [(slot, rnd.number(coinsum)) for slot in range(slotcount)]
+    indices.sort(key=lambda t: t[1])  # sort by coin index
+
+    leaders = []
+    it = iter(stakelist)
+    current_holder, upper_range = next(it)
+    for slot, idx in indices:
+        while True:
+            if idx <= upper_range:
+                leaders.append((slot, current_holder))
+                break
+
+            current_holder, c = next(it)
+            upper_range += c
+
+    assert len(leaders) == slotcount
+    leaders.sort(key=lambda t: t[0])  # sort by slot index
+    return [leader for _, leader in leaders]
+
+
+def genesis_block0():
+    'create the first genesis block from config.'
+    stakes = genesis_stakes().items()
+    leaders = fts(
+        config.GENESIS['protocolConsts']['k'] * 10,
+        config.GENESIS['ftsSeed'].encode(),
+        sum(n for _, n in stakes),
+        stakes,
+    )
+    return DecodedBlock([
+        0,
+        [[
+            config.PROTOCOL_MAGIC,
+            config.GENESIS_HASH,
+            hash_data(leaders),
+            [0, 0],
+            {}
+        ], leaders],
+        {}
+    ])
+
+
 if __name__ == '__main__':
-    from .storage import Storage
-    from .utils import get_current_slot
-    store = Storage('test_db', readonly=True)
-    hdr = store.tip()
-    blk = store.block(hdr)
-    prev_header = store.blockheader(blk.header().prev_header())
-    print(hdr.slot())
-    genesis = store.genesis_block(hdr.slot()[0])
-    print(blk.unknowns(), hdr.unknowns())
-    verify_block(blk, config.PROTOCOL_MAGIC,
-                 max_block_size=config.MAX_BLOCK_SIZE,
-                 body_no_unknown=True,
-                 header_no_unknown=True,
-                 current_slot=get_current_slot(),
-                 prev_header=prev_header,
-                 leaders=genesis.leaders())
+    config.use('mainnet')
+    blk = genesis_block0()
+    leaders = blk.leaders()
+
+    from cardano.storage import Storage
+    store = Storage('test_db')
+    db_leaders = store.genesis_block(0).leaders()
+
+    # compare with official result.
+    for i in range(10):
+        print(leaders[i], db_leaders[i])

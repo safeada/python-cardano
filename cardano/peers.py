@@ -24,7 +24,7 @@ def resolve_loop(domains):
     while True:
         addrs = resolve(domains)
         if not addrs:
-            gevent.sleep(config.SLOT_DURATION)
+            gevent.sleep(config.SLOT_DURATION / 1000)
             continue
 
         for ip, port, id in addrs:

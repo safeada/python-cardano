@@ -24,6 +24,7 @@ import cbor
 import rocksdb
 
 from .block import DecodedBlock, DecodedBlockHeader
+from . import config
 
 
 def iter_prefix(db, prefix):
@@ -78,9 +79,6 @@ class Storage(object):
     def set_tip(self, hdr, batch=None):
         self._tip = hdr
         (batch or self.db).put(b'c/tip', hdr.hash())
-
-    def genesis_block_hash(self):
-        return self.open_epoch_db(0).get(b'genesis')
 
     def blockheader(self, h):
         buf = self.db.get(b'b/' + h)

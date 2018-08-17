@@ -101,7 +101,7 @@ class Subscribe(Worker):
 
     def keepalive(self):
         while True:
-            gevent.sleep(config.SLOT_DURATION)
+            gevent.sleep(config.SLOT_DURATION / 1000)
             # keep alive
             self.conv.send(cbor.dumps(43))
 
@@ -174,7 +174,8 @@ listeners = {
 
 
 def retry_duration(duration):
-    return math.floor(config.SLOT_DURATION / 2 ** (duration / config.SLOT_DURATION))
+    slot = config.SLOT_DURATION / 1000
+    return math.floor(slot / 2 ** (duration / slot))
 
 
 class LogicNode(Node):

@@ -23,5 +23,5 @@ def unflatten_slotid(n):
 
 
 def get_current_slot():
-    n = (int(time.time()) - config.START_TIME) // config.SLOT_DURATION
+    n = (int(time.time()) - config.START_TIME) // (config.SLOT_DURATION / 1000)
     return unflatten_slotid(n)

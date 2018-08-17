@@ -14,6 +14,7 @@ import binascii
 import hashlib  # Python >= 3.6
 import hmac
 import struct
+from collections import namedtuple
 
 from mnemonic import Mnemonic
 import cbor
@@ -25,6 +26,9 @@ from .utils import hash_data
 from .constants import BIP44_PURPOSE, BIP44_COIN_TYPE
 
 FIRST_HARDEN_INDEX = 2147483648
+
+AddressContent = namedtuple('AddressContent', 'type spending attrs')
+Address = namedtuple('Addr', 'hash attrs type')
 
 
 def mnemonic_to_seed(words, lang='english'):
@@ -64,30 +68,38 @@ def unpack_addr_payload(ciphertext, hdpass):
 
 def root_addr(xpub):
     'Address\', assuming BootstrapEra'
-    return [
+    return AddressContent(
         0,            # addrType
         [0, xpub],    # addrSpendingData
         {}            # attrAttributes
-    ]
+    )
 
 
 def hd_addr(xpub, derive_path, hdpass):
     'Address\', assuming BootstrapEra'
-    return [
+    return AddressContent(
         0,            # addrType
         [0, xpub],    # addrSpendingData
         {1: cbor.dumps(pack_addr_payload(derive_path, hdpass))}  # attrAttributes
-    ]
+    )
+
+
+def redeem_addr(pk):
+    return AddressContent(
+        2,          # RedeemASD
+        [2, pk],
+        {}
+    )
 
 
 def addr_hash(addr):
     'hash method for address is different.'
-    return hashlib.blake2b(hashlib.sha3_256(cbor.dumps(addr)).digest(),
+    return hashlib.blake2b(hashlib.sha3_256(cbor.dumps(addr, sort_keys=True)).digest(),
                            digest_size=28).digest()
 
 
 def encode_with_crc(v):
-    s = cbor.dumps(v)
+    s = cbor.dumps(v, sort_keys=True)
     return cbor.dumps([
         cbor.Tag(24, s),
         binascii.crc32(s)
@@ -98,31 +110,31 @@ def encode_addr(addr):
     h = addr_hash(addr)
     return encode_with_crc([
         h,
-        addr[2],
-        addr[0]
+        addr.attrs,
+        addr.type
     ])
 
 
 def addr_hash_short(addr):
     'Shorten hash result to 20 bytes.'
-    return hashlib.blake2b(hashlib.sha3_256(cbor.dumps(addr)).digest(),
+    return hashlib.blake2b(hashlib.sha3_256(cbor.dumps(addr, sort_keys=True)).digest(),
                            digest_size=20).digest()
 
 
 def encode_with_crc_short(v):
     'Remove a level of cbor overhead.'
-    s = cbor.dumps(v)
+    s = cbor.dumps(v, sort_keys=True)
     # the prefix byte is for backward compatibility, old address always start with 0x82.
     return b'\x00' + s + struct.pack('<I', binascii.crc32(s))
 
 
 def encode_addr_short(addr):
-    attrs = addr[2].copy()
+    attrs = addr.attrs.copy()
     attrs.pop(1, None)  # Don't encode derive path in address.
     return encode_with_crc_short([
         addr_hash_short(addr),
         attrs,
-        addr[0]
+        addr.type
     ])
 
 
@@ -136,7 +148,7 @@ def decode_addr(s):
         tag, crc32 = cbor.loads(s)
         s = tag.value
     assert binascii.crc32(s) == crc32, 'crc32 checksum don\'t match.'
-    return cbor.loads(s)
+    return Address(*cbor.loads(s))
 
 
 def derive_key(xpriv, passphase, path, derivation_schema):
@@ -158,10 +170,10 @@ def bip44_derive_address(xpriv, passphase, derivation_schema, account, change, i
     return derive_address(xpriv, passphase, path, derivation_schema)
 
 
-def get_derive_path(addr, hdpass):
+def get_derive_path(s, hdpass):
     'Get derive path from lagacy address.'
-    _, attrs, _ = decode_addr(addr)
-    payload = attrs.get(1)
+    addr = decode_addr(s)
+    payload = addr.attrs.get(1)
     if payload:
         return unpack_addr_payload(cbor.loads(payload), hdpass)
 
@@ -196,12 +208,12 @@ def recover_utxo_from_storage(store, hdpass):
     return result
 
 
-def verify_address(addr, xpub):
+def verify_address(s, xpub):
     'verify address with pubkey'
-    addr_hash, attrs, addr_type = decode_addr(addr)
-    if addr_type != 0:
+    addr = decode_addr(s)
+    if addr.type != 0:
         return False
-    if encode_addr([addr_type, [0, xpub], attrs]) != addr:
+    if encode_addr(AddressContent(addr.type, [0, xpub], addr.attrs)) != addr:
         return False
     return True
 
