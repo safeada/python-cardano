@@ -55,6 +55,10 @@ def use(key):
         'mainnet-staging': 'mainnet_dryrun_full',
         'testnet': 'testnet_full',
     }[key]
+    genesis_block_hash = {
+        'mainnet': binascii.unhexlify(
+            '89d9b5a5b8ddc8d7e5a6795e9774d97faf1efea59b2caf7eaf9f8c5b32059df4')
+    }[key]
     cfg = g_config[confkey]
     g['CHAIN'] = cfg
 
@@ -65,21 +69,15 @@ def use(key):
     assert genesis_hash == genesis_cfg['hash'].encode()
 
     g['GENESIS'] = genesis
-    g['GENESIS_HASH'] = genesis_hash
+    g['GENESIS_HASH'] = genesis_hash  # genesis block's prev_header
+    g['GENESIS_BLOCK_HASH'] = genesis_block_hash  # FIXME generate genesis block ourself
     g['PROTOCOL_MAGIC'] = genesis['protocolConsts']['protocolMagic']
     g['SECURITY_PARAMETER_K'] = genesis['protocolConsts']['k']
-    g['SLOT_DURATION'] = genesis['blockVersionData']['slotDuration']
+    g['SLOT_DURATION'] = int(genesis['blockVersionData']['slotDuration'])
     g['START_TIME'] = genesis['startTime']
     g['MAX_BLOCK_SIZE'] = genesis['blockVersionData']['maxBlockSize']
     g['MAX_HEADER_SIZE'] = genesis['blockVersionData']['maxHeaderSize']
 
 
-# mainchain config
-#MAINCHAIN_GENESIS = binascii.unhexlify(
-#    '89d9b5a5b8ddc8d7e5a6795e9774d97faf1efea59b2caf7eaf9f8c5b32059df4')
-#MAINCHAIN_GENESIS_PREV = binascii.unhexlify(
-#    '5f20df933584822601f9e3f8c024eb5eb252fe8cefb24d1317dc3d432e940ebb')
-
 if __name__ == '__main__':
     use('mainnet')
-    print('ended')

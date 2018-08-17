@@ -32,6 +32,6 @@ def resolve_loop(domains):
 
 
 if __name__ == '__main__':
-    for addr in resolve_loop([config.MAINCHAIN_ADDR]):
+    for addr in resolve_loop([config.CLUSTER_ADDR]):
         print(addr)
         gevent.sleep(1)

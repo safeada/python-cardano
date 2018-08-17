@@ -123,7 +123,7 @@ class Storage(object):
                 cbor.loads(self.db.get(b'b/' + start_hash))
             ).slot()
         else:
-            start_hash = config.MAINCHAIN_GENESIS
+            start_hash = config.GENESIS_BLOCK_HASH
             current_epoch = 0
 
         current_epoch_db = self.open_epoch_db(current_epoch, readonly=True)
@@ -163,7 +163,7 @@ class Storage(object):
             current_hash = hdr.prev_header()
 
     def blockheaders(self):
-        current_hash = config.MAINCHAIN_GENESIS
+        current_hash = config.GENESIS_BLOCK_HASH
         while True:
             raw = self.db.get(b'b/' + current_hash)
             yield DecodedBlockHeader.from_raw(raw, current_hash)

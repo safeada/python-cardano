@@ -107,3 +107,4 @@ venv.bak/
 /cardano/cbits.c
 /test_db
 /tags
+/conf/cached_configuration.cbor

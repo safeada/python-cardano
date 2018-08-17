@@ -201,7 +201,7 @@ class LogicNode(Node):
 
         # dns subscribe worker
         self._peers = gevent.event.AsyncResult()  # set of peer addresses
-        self.subscribe_thread = gevent.spawn(self._subscribe, [config.MAINCHAIN_ADDR])
+        self.subscribe_thread = gevent.spawn(self._subscribe, [config.CLUSTER_ADDR])
         self.subscribe_thread.link(self._handle_worker_exit)
 
     def _handle_worker_exit(self, t):

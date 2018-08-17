@@ -603,7 +603,7 @@ if __name__ == '__main__':
     ep = Transport().endpoint()  # Unaddressable transport.
     # ep = Transport(('127.0.0.1', 3000)).endpoint()
     print('connect')
-    conn = ep.connect(config.MAINCHAIN_ADDR)
+    conn = ep.connect(config.CLUSTER_ADDR)
 
     # cardano node handshake.
     # send peer data.

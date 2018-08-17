@@ -22,7 +22,7 @@ def classify_new_header(tip_header, header):
         print('new header slot not advanced than tip')
         return
 
-    tip_hash = tip_header.hash() if tip_header else config.MAINCHAIN_GENESIS
+    tip_hash = tip_header.hash() if tip_header else config.GENESIS_BLOCK_HASH
     if header.prev_header() == tip_hash:
         verify_header(header, config.PROTOCOL_MAGIC,
                       prev_header=tip_header, current_slot=current_slot)
@@ -93,7 +93,7 @@ class BlockRetriever(object):
 
     def _handle_recovery_task(self, addr, header):
         tip_header = self.store.tip()
-        checkpoints = [tip_header.hash() if tip_header else config.MAINCHAIN_GENESIS]
+        checkpoints = [tip_header.hash() if tip_header else config.GENESIS_BLOCK_HASH]
         # TODO proper checkpoints
         self._stream_blocks(addr, checkpoints, header.hash())
 
@@ -101,7 +101,7 @@ class BlockRetriever(object):
         tip_header = self.store.tip()
         if not tip_header:
             print('retrieve genesis block')
-            b = self.node.worker(Message.GetBlocks, addr).one(config.MAINCHAIN_GENESIS)
+            b = self.node.worker(Message.GetBlocks, addr).one(config.GENESIS_BLOCK_HASH)
             self._handle_blocks([b])
             tip_header = self.store.tip()
         result = classify_new_header(tip_header, header)

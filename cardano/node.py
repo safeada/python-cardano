@@ -253,9 +253,10 @@ def default_node(ep):
 
 
 if __name__ == '__main__':
+    config.use('mainnet')
     from .transport import Transport
     node = default_node(Transport().endpoint())
-    worker = node.worker(Message.Subscribe, config.MAINCHAIN_ADDR)
+    worker = node.worker(Message.Subscribe, config.CLUSTER_ADDR)
     # send subscribe
     worker()
     # keepalive loop

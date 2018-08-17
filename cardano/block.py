@@ -287,6 +287,7 @@ def fts(slotcount, seed, coinsum, stakelist):
 def genesis_block0():
     'create the first genesis block from config.'
     stakes = genesis_stakes().items()
+    # TODO cardano-sl used HM.toList to sort genesis stakes, so...
     leaders = fts(
         config.GENESIS['protocolConsts']['k'] * 10,
         config.GENESIS['ftsSeed'].encode(),
