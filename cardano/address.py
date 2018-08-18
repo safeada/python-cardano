@@ -213,7 +213,8 @@ def verify_address(s, xpub):
     addr = decode_addr(s)
     if addr.type != 0:
         return False
-    if encode_addr(AddressContent(addr.type, [0, xpub], addr.attrs)) != addr:
+    confirm = AddressContent(addr.type, [addr.type, xpub], addr.attrs)
+    if encode_addr(confirm) != s:
         return False
     return True
 
@@ -246,8 +247,8 @@ def test_recover(dbpath, words, passphase):
 
 
 if __name__ == '__main__':
-    import getpass
-    passphase = getpass.getpass('Input passphase:').encode()
+    from .utils import input_passphase
+    passphase = input_passphase()
     words = 'ring crime symptom enough erupt lady behave ramp apart settle citizen junk'
     # test_encode_address(words, passphase)
     import sys

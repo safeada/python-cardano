@@ -9,3 +9,4 @@ recordclass==0.5
 python-rocksdb==0.6.9
 dnspython==1.15.0
 PyYAML==3.13
+appdirs==1.4.3

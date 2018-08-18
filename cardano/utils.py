@@ -1,6 +1,7 @@
 import hashlib
 import time
 import cbor
+import getpass
 
 from . import config
 
@@ -25,3 +26,10 @@ def unflatten_slotid(n):
 def get_current_slot():
     n = (int(time.time()) - config.START_TIME) // (config.SLOT_DURATION / 1000)
     return unflatten_slotid(n)
+
+
+def input_passphase():
+    passphase = getpass.getpass('Input passphase:').encode()
+    if passphase:
+        return hashlib.blake2b(passphase, digest_size=32).digest()
+    return passphase
