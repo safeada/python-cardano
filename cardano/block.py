@@ -9,11 +9,10 @@ We also try to cache raw data, to prevent re-serialization.
 '''
 import cbor
 import base64
-import base58
 import binascii
 from collections import defaultdict
 from .utils import hash_serialized, hash_data
-from .address import addr_hash, redeem_addr, decode_addr
+from .address import Address, AddressContent, addr_hash
 from .random import Random
 from . import config
 
@@ -83,12 +82,19 @@ class DecodedBlockHeader(DecodedBase):
 
 class DecodedTransaction(DecodedBase):
     def tx(self):
-        from .wallet import Tx, TxIn, TxOut
-        inputs = set(TxIn(*cbor.loads(item.value))
-                     for tag, item in self.data[0]
-                     if tag == 0)
-        outputs = [TxOut(cbor.dumps(addr), c) for addr, c in self.data[1]]
-        return Tx(self.txid(), inputs, outputs)
+        from .wallet import Tx
+        return Tx(self.txid(), self.inputs(), self.outputs())
+
+    def inputs(self):
+        from .wallet import TxIn
+        return set(TxIn(*cbor.loads(item.value))
+                   for tag, item in self.data[0]
+                   if tag == 0)
+
+    def outputs(self):
+        from .wallet import TxOut
+        return [TxOut(cbor.dumps(addr), c)
+                for addr, c in self.data[1]]
 
     def txid(self):
         return hash_data(self.data)
@@ -213,9 +219,9 @@ def avvm_pk(s):
 
 
 def genesis_balances():
-    return [(redeem_addr(avvm_pk(k)), int(v))
+    return [(AddressContent.redeem(avvm_pk(k)).address(), int(v))
             for k, v in config.GENESIS['avvmDistr'].items()] + \
-        [(decode_addr(base58.b58decode(k)), int(v))
+        [(Address.decode_base58(k), int(v))
          for k, v in config.GENESIS['nonAvvmBalances'].items()]
 
 

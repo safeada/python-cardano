@@ -13,10 +13,12 @@ import gevent
 from cardano.transport import Transport
 from cardano.storage import Storage, remove_prefix
 from cardano.logic import LogicNode
+from cardano.constants import FIRST_HARDEN_INDEX
 from cardano.address import (
-    derive_hdpassphase, xpriv_to_xpub, get_derive_path,
-    derive_key, verify_address, mnemonic_to_seed, gen_root_xpriv,
-    encode_addr, root_addr, derive_address, FIRST_HARDEN_INDEX
+    Address, AddressContent,
+    derive_hdpassphase, xpriv_to_xpub,
+    derive_key, mnemonic_to_seed, gen_root_xpriv,
+    derive_address_lagacy
 )
 from cardano.cbits import encrypted_sign, verify, DERIVATION_V1
 from cardano.utils import input_passphase
@@ -51,14 +53,14 @@ def handle_sign(args):
     root_xpriv = binascii.unhexlify(cfg['root_key'])
     root_xpub = xpriv_to_xpub(root_xpriv)
     hdpass = derive_hdpassphase(root_xpub)
-    addr = base58.b58decode(args.addr)
-    path = get_derive_path(addr, hdpass)
+    addr = Address.decode_base58(args.addr)
+    path = addr.get_derive_path(hdpass)
     if path is None:
         print('the address don\'t belong to this wallet')
         return
     xpriv = derive_key(root_xpriv, passphase, path, DERIVATION_V1)
     xpub = xpriv_to_xpub(xpriv)
-    if not verify_address(addr, xpub):
+    if not addr.verify_pubkey(xpub):
         print('the passphase is wrong')
         return
     sig = encrypted_sign(xpriv, passphase, args.message.encode('utf-8'))
@@ -72,14 +74,14 @@ def handle_sign(args):
 
 def handle_verify(args):
     data = json.loads(args.json)
-    addr = base58.b58decode(data['addr'])
+    addr = Address.decode_base58(data['addr'])
     xpub = binascii.unhexlify(data['xpub'])
     pub = xpub[:32]
     msg = data['msg'].encode('utf-8')
     sig = binascii.unhexlify(data['sig'])
 
     # verify address and pubkey
-    if not verify_address(addr, xpub):
+    if not addr.verify_pubkey(xpub):
         print('address and xpub is mismatched')
         return
 
@@ -181,7 +183,10 @@ def handle_wallet_import(args):
     secrets = {}
     for item in cbor.load(open(path, 'rb'))[2]:
         xpriv = item[0]
-        wid = base58.b58encode(encode_addr(root_addr(xpriv_to_xpub(xpriv)))).decode()
+        wid = AddressContent.pubkey(xpriv_to_xpub(xpriv)) \
+                            .address() \
+                            .encode_base58() \
+                            .decode()
         secrets[wid] = xpriv
 
     candidates = []
@@ -204,8 +209,8 @@ def handle_genaddress(args):
     root_key = binascii.unhexlify(cfg['root_key'])
     path = [FIRST_HARDEN_INDEX, FIRST_HARDEN_INDEX + args.index]
     passphase = input_passphase()
-    addr = derive_address(root_key, passphase, path, DERIVATION_V1)
-    print(base58.b58encode(encode_addr(addr)).decode())
+    addr = derive_address_lagacy(root_key, passphase, path, DERIVATION_V1)
+    print(addr.address().encode_base58().decode())
 
 
 def handle_wallet_balance(args):
@@ -218,7 +223,7 @@ def handle_wallet_balance(args):
     store = Storage(args.root)
     txouts = []
     for txin, txout in store.iter_utxo():
-        if get_derive_path(txout.addr, hdpass):
+        if Address.decode(txout.addr).get_derive_path(hdpass):
             txouts.append(txout)
 
     balance = sum(out.c for out in txouts)

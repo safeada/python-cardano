@@ -23,12 +23,7 @@ import base58
 
 from . import cbits
 from .utils import hash_data
-from .constants import BIP44_PURPOSE, BIP44_COIN_TYPE
-
-FIRST_HARDEN_INDEX = 2147483648
-
-AddressContent = namedtuple('AddressContent', 'type spending attrs')
-Address = namedtuple('Addr', 'hash attrs type')
+from .constants import FIRST_HARDEN_INDEX
 
 
 def mnemonic_to_seed(words, lang='english'):
@@ -66,32 +61,6 @@ def unpack_addr_payload(ciphertext, hdpass):
         return cbor.loads(plaintext)
 
 
-def root_addr(xpub):
-    'Address\', assuming BootstrapEra'
-    return AddressContent(
-        0,            # addrType
-        [0, xpub],    # addrSpendingData
-        {}            # attrAttributes
-    )
-
-
-def hd_addr(xpub, derive_path, hdpass):
-    'Address\', assuming BootstrapEra'
-    return AddressContent(
-        0,            # addrType
-        [0, xpub],    # addrSpendingData
-        {1: cbor.dumps(pack_addr_payload(derive_path, hdpass))}  # attrAttributes
-    )
-
-
-def redeem_addr(pk):
-    return AddressContent(
-        2,          # RedeemASD
-        [2, pk],
-        {}
-    )
-
-
 def addr_hash(addr):
     'hash method for address is different.'
     return hashlib.blake2b(hashlib.sha3_256(cbor.dumps(addr, sort_keys=True)).digest(),
@@ -103,15 +72,6 @@ def encode_with_crc(v):
     return cbor.dumps([
         cbor.Tag(24, s),
         binascii.crc32(s)
-    ])
-
-
-def encode_addr(addr):
-    h = addr_hash(addr)
-    return encode_with_crc([
-        h,
-        addr.attrs,
-        addr.type
     ])
 
 
@@ -129,26 +89,92 @@ def encode_with_crc_short(v):
 
 
 def encode_addr_short(addr):
-    attrs = addr.attrs.copy()
-    attrs.pop(1, None)  # Don't encode derive path in address.
     return encode_with_crc_short([
         addr_hash_short(addr),
-        attrs,
+        addr.attrs,
         addr.type
     ])
 
 
-def decode_addr(s):
-    if s[0] == 0:
-        # version byte for new encoding.
-        crc32, = struct.unpack('<I', s[-4:])
-        s = s[1:-4]
-    else:
-        # old normal address.
-        tag, crc32 = cbor.loads(s)
-        s = tag.value
-    assert binascii.crc32(s) == crc32, 'crc32 checksum don\'t match.'
-    return Address(*cbor.loads(s))
+RawAddressContent = namedtuple('RawAddressContent', 'type spending attrs')
+RawAddress = namedtuple('RawAddress', 'hash attrs type')
+
+
+class Address(RawAddress):
+    def encode(self):
+        return encode_with_crc(self)
+
+    def encode_base58(self):
+        return base58.b58encode(self.encode())
+
+    @classmethod
+    def decode(cls, s):
+        if s[0] == 0:
+            # version byte for new encoding.
+            crc32, = struct.unpack('<I', s[-4:])
+            s = s[1:-4]
+        else:
+            # old normal address.
+            tag, crc32 = cbor.loads(s)
+            s = tag.value
+        assert binascii.crc32(s) == crc32, 'crc32 checksum don\'t match.'
+        return cls(*cbor.loads(s))
+
+    @classmethod
+    def decode_base58(cls, s):
+        return cls.decode(base58.b58decode(s))
+
+    def verify_pubkey(self, xpub):
+        if self.type != 0:
+            return False
+        confirm = AddressContent(0, [0, xpub], self.attrs)
+        return confirm.address().hash == self.hash
+
+    def verify_script(self, script):
+        # TODO
+        pass
+
+    def get_derive_path(self, hdpass):
+        'Get derive path from lagacy address.'
+        payload = self.attrs.get(1)
+        if payload:
+            return unpack_addr_payload(cbor.loads(payload), hdpass)
+
+
+class AddressContent(RawAddressContent):
+    @staticmethod
+    def pubkey(xpub, attrs=None):
+        return AddressContent(
+            0, [0, xpub], attrs or {}
+        )
+
+    @staticmethod
+    def pubkey_lagacy(xpub, derive_path, hdpass, attrs=None):
+        return AddressContent(
+            0,            # addrType
+            [0, xpub],    # addrSpendingData
+            {1: cbor.dumps(pack_addr_payload(derive_path, hdpass)), **(attrs or {})}
+        )
+
+    @staticmethod
+    def redeem(pk):
+        return AddressContent(
+            2,          # RedeemASD
+            [2, pk],
+            {}
+        )
+
+    @staticmethod
+    def script(s):
+        # TODO
+        pass
+
+    def address(self):
+        return Address(
+            addr_hash(self),
+            self.attrs,
+            self.type
+        )
 
 
 def derive_key(xpriv, passphase, path, derivation_schema):
@@ -159,97 +185,50 @@ def derive_key(xpriv, passphase, path, derivation_schema):
     return xpriv
 
 
-def derive_address(xpriv, passphase, path, derivation_schema):
+def derive_key_public(xpub, path, derivation_schema):
+    for idx in path:
+        xpub = cbits.encrypted_derive_public(xpub, idx, derivation_schema)
+    return xpub
+
+
+def derive_address_lagacy(xpriv, passphase, path, derivation_schema):
     hdpass = derive_hdpassphase(xpriv_to_xpub(xpriv))
     xpriv = derive_key(xpriv, passphase, path, derivation_schema)
-    return hd_addr(xpriv_to_xpub(xpriv), path, hdpass)
+    return AddressContent.pubkey_lagacy(xpriv_to_xpub(xpriv), path, hdpass)
 
 
-def bip44_derive_address(xpriv, passphase, derivation_schema, account, change, index):
-    path = [BIP44_PURPOSE, BIP44_COIN_TYPE, account, change, index]
-    return derive_address(xpriv, passphase, path, derivation_schema)
-
-
-def get_derive_path(s, hdpass):
-    'Get derive path from lagacy address.'
-    addr = decode_addr(s)
-    payload = addr.attrs.get(1)
-    if payload:
-        return unpack_addr_payload(cbor.loads(payload), hdpass)
-
-
-def recover_from_blocks(blocks, hdpass):
-    print('Start iterating blocks...')
-    addrs = {}  # addr -> derive path
-    count = 0
-    for blk in blocks:
-        for tx in blk.txs():
-            for out in tx.outputs:
-                path = get_derive_path(out.addr, hdpass)
-                if path:
-                    print('found address', base58.b58encode(out.addr))
-                    addrs[out.addr] = path
-        count += 1
-        if count % 10000 == 0:
-            print(count, 'blocks')
-
-    return addrs
-
-
-def recover_from_storage(store, hdpass):
-    return recover_from_blocks(store.blocks_rev(), hdpass)
-
-
-def recover_utxo_from_storage(store, hdpass):
-    result = {}
-    for txin, txout in store.iter_utxo():
-        if get_derive_path(txout.addr, hdpass):
-            result[txin] = txout
+def recover_addresses_lagacy(store, hdpass):
+    result = set()
+    for addr in store.iter_addresses():
+        if Address.decode(addr).get_derive_path(hdpass):
+            result.add(addr)
     return result
 
 
-def verify_address(s, xpub):
-    'verify address with pubkey'
-    addr = decode_addr(s)
-    if addr.type != 0:
-        return False
-    confirm = AddressContent(addr.type, [addr.type, xpub], addr.attrs)
-    if encode_addr(confirm) != s:
-        return False
-    return True
-
-
-def test_encode_address(words, passphase):
-    root_xpriv = gen_root_xpriv(mnemonic_to_seed(words), passphase)
-    addr = root_addr(xpriv_to_xpub(root_xpriv))
-    print('wallet id', base58.b58encode(encode_addr(addr)).decode())
-    print('wallet id[short]', base58.b58encode(encode_addr_short(addr)).decode())
+def test_encode_address(root_xpriv, passphase):
+    addr = AddressContent.pubkey(xpriv_to_xpub(root_xpriv))
+    print('wallet id', addr.address().encode_base58().decode())
+    # print('wallet id[short]', base58.b58encode(encode_addr_short(addr)).decode())
     path = [FIRST_HARDEN_INDEX, FIRST_HARDEN_INDEX]
-    addr = derive_address(root_xpriv, passphase, path, cbits.DERIVATION_V1)
-    print('first address', base58.b58encode(encode_addr(addr)).decode())
-    addr = derive_address(root_xpriv, passphase, path, cbits.DERIVATION_V1)
-    print('first address[short]', base58.b58encode(encode_addr_short(addr)).decode())
-    print('decode', decode_addr(encode_addr(addr)))
-    print('decode[short]', decode_addr(encode_addr_short(addr)))
+    addr = derive_address_lagacy(root_xpriv, passphase, path, cbits.DERIVATION_V1)
+    print('first address', addr.address().encode_base58().decode())
+    addr = derive_address_lagacy(root_xpriv, passphase, path, cbits.DERIVATION_V1)
+    # print('first address[short]', base58.b58encode(encode_addr_short(addr)).decode())
+    print('decode', Address.decode(addr.address().encode()))
+    # print('decode[short]', Address.decode(encode_addr_short(addr)))
 
     hdpass = derive_hdpassphase(xpriv_to_xpub(root_xpriv))
-    print('decrypte derive path', get_derive_path(encode_addr(addr), hdpass))
-
-
-def test_recover(dbpath, words, passphase):
-    from .storage import Storage
-    store = Storage(dbpath, readonly=True)
-
-    root_xpriv = gen_root_xpriv(mnemonic_to_seed(words), passphase)
-    hdpass = derive_hdpassphase(xpriv_to_xpub(root_xpriv))
-    # print(recover_from_storage(store, hdpass))
-    print(recover_utxo_from_storage(store, hdpass))
+    print('decrypte derive path', addr.address().get_derive_path(hdpass))
 
 
 if __name__ == '__main__':
     from .utils import input_passphase
     passphase = input_passphase()
     words = 'ring crime symptom enough erupt lady behave ramp apart settle citizen junk'
-    # test_encode_address(words, passphase)
-    import sys
-    test_recover(sys.argv[1], words, passphase)
+    root_xpriv = gen_root_xpriv(mnemonic_to_seed(words), passphase)
+    # test_encode_address(root_xpriv, passphase)
+
+    from .storage import Storage
+    hdpass = derive_hdpassphase(xpriv_to_xpub(root_xpriv))
+    for addr in recover_addresses_lagacy(Storage('test_db'), hdpass):
+        print(base58.b58encode(addr).decode())

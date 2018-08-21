@@ -10,6 +10,7 @@
   * 'ut/t/' + txIn -> TxOut
   * 's/' + stake holder id
   * 's/ftssum'
+  * 'a/' + addr -> 1 # address discovery.
 
 Sync
 ----
@@ -192,6 +193,9 @@ class Storage(object):
         batch.put(b'e/fl/' + hdr.prev_header(), h)
         if not block.is_genesis():
             self.utxo_apply_block(block, batch)
+            for tx in block.transactions():
+                for out in tx.outputs():
+                    batch.put(b'a/' + out.addr, b'')
         self.set_tip(hdr, batch)
         self.db.write(batch)
 
@@ -215,3 +219,11 @@ class Storage(object):
         prefix = b'ut/t/'
         for k, v in iter_prefix(self.db, prefix):
             yield TxIn(*cbor.loads(k[len(prefix):])), TxOut(*cbor.loads(v))
+
+    def iter_addresses(self):
+        it = self.db.iterkeys()
+        it.seek(b'a/')
+        for k in it:
+            if not k.startswith(b'a/'):
+                break
+            yield k[2:]

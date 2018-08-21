@@ -86,17 +86,17 @@ cdef extern from *:
     )
 
 def encrypted_derive_public(xpub, index, mode):
-    pub_out = bytearray(32)
-    cc_out = bytearray(32)
+    pub_out = bytes(32)
+    cc_out = bytes(32)
     if wallet_encrypted_derive_public(xpub[:32], xpub[32:], index, pub_out, cc_out, mode) == 0:
-        return bytes(pub_out + cc_out)
+        return pub_out + cc_out
 
 def encrypted_derive_private(skey, pass_, index, mode):
     cdef uint8_t* c_pass = pass_
     cdef uint32_t l_pass = len(pass_)
-    out = bytearray(128)
+    out = bytes(128)
     wallet_encrypted_derive_private(skey, c_pass, l_pass, index, out, mode)
-    return bytes(out)
+    return out
 
 def encrypted_from_secret(pass_, seed, cc):
     cdef uint8_t* c_pass = pass_
