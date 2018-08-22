@@ -1,8 +1,9 @@
 '''
 * Use rocksdb as cardano-sl did.
 * Store each epoch in seperate db.
-    hash -> block data
-    genesis -> hash of genesis block of epoch.
+    'b/' + hash -> block data
+    'u/' + hash -> undo data
+    g -> hash of genesis block of epoch.
 * Main database:
   * 'c/tip' -> hash
   * 'b/' + hash -> BlockHeader
@@ -88,13 +89,19 @@ class Storage(object):
 
     def block(self, hdr):
         db = self.open_epoch_db(hdr.slot()[0], readonly=True)
-        buf = db.get(hdr.hash())
+        buf = db.get(b'b/' + hdr.hash())
         if buf:
             return DecodedBlock(cbor.loads(buf), buf)
 
+    def undos(self, hdr):
+        db = self.open_epoch_db(hdr.slot()[0], readonly=True)
+        buf = db.get(b'u/' + hdr.hash())
+        if buf:
+            return cbor.loads(buf)
+
     def genesis_block(self, epoch):
         db = self.open_epoch_db(epoch, readonly=True)
-        h = db.get(b'genesis')
+        h = db.get(b'g')
         assert h, 'epoch not exist: %d' % epoch
         return DecodedBlock.from_raw(db.get(h))
 
@@ -104,7 +111,7 @@ class Storage(object):
         current_epoch = self.blockheader(current_hash).slot()[0]
         current_epoch_db = self.open_epoch_db(current_epoch, readonly=True)
         while True:
-            raw = current_epoch_db.get(current_hash)
+            raw = current_epoch_db.get(b'b/' + current_hash)
             if not raw:
                 # try decrease epoch id.
                 current_epoch -= 1
@@ -129,14 +136,14 @@ class Storage(object):
 
         current_epoch_db = self.open_epoch_db(current_epoch, readonly=True)
         current_hash = start_hash
-        raw = current_epoch_db.get(current_hash)
+        raw = current_epoch_db.get(b'b/' + current_hash)
         yield DecodedBlock(cbor.loads(raw), raw)
         while True:
             current_hash = self.db.get(b'e/fl/' + current_hash)
             if not current_hash:
                 return
 
-            raw = current_epoch_db.get(current_hash)
+            raw = current_epoch_db.get(b'b/' + current_hash)
             if raw:
                 yield DecodedBlock(cbor.loads(raw), raw)
                 continue
@@ -146,7 +153,7 @@ class Storage(object):
             current_epoch_db = self.open_epoch_db(current_epoch, readonly=True)
             if not current_epoch_db:
                 return
-            raw = current_epoch_db.get(current_hash)
+            raw = current_epoch_db.get(b'b/' + current_hash)
             if not raw:
                 return
 
@@ -191,7 +198,9 @@ class Storage(object):
         h = hdr.hash()
         batch.put(b'b/' + h, hdr.raw())
         batch.put(b'e/fl/' + hdr.prev_header(), h)
+        undos = None
         if not block.is_genesis():
+            undos = self._get_block_undos(block)
             self.utxo_apply_block(block, batch)
             for tx in block.transactions():
                 for out in tx.outputs():
@@ -202,10 +211,18 @@ class Storage(object):
         # write body
         epoch, _ = hdr.slot()
         db = self.open_epoch_db(epoch, readonly=False)
+        batch = rocksdb.WriteBatch()
         if hdr.is_genesis():
-            assert not db.get(b'genesis')
-            db.put(b'genesis', h)
-        db.put(h, block.raw())
+            assert not db.get(b'g')
+            batch.put(b'g', h)
+        else:
+            batch.put(b'u/' + h, cbor.dumps(undos))
+        batch.put(b'b/' + h, block.raw())
+        db.write(batch)
+
+    def _get_block_undos(self, block):
+        return [[self.get_output(txin) for txin in tx.inputs()]
+                for tx in block.transactions()]
 
     def utxo_apply_block(self, block, batch):
         txins, utxo = block.utxos()
@@ -227,3 +244,8 @@ class Storage(object):
             if not k.startswith(b'a/'):
                 break
             yield k[2:]
+
+    def get_output(self, txin):
+        data = self.db.get(b'ut/t/' + cbor.dumps(txin))
+        if data:
+            return cbor.loads(data)

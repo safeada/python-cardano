@@ -270,6 +270,8 @@ def cli_parser():
     p_root = argparse.ArgumentParser(description='Python cardano cli.', parents=[common])
     sp_root = p_root.add_subparsers(help='actions')
 
+    sp_root.add_parser('help', help='Print this help.')
+
     p_run = sp_root.add_parser(
         'run',
         parents=[common],

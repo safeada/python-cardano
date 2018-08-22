@@ -311,17 +311,17 @@ if __name__ == '__main__':
     from .storage import Storage
     from .utils import hash_data
     from .address import AddressContent
-    from .block import build_tx, sign_tx
+    from .block import DecodedTransaction, DecodedTxAux
 
     txid = hash_data(b'')
     pk = bytes(64)
     sig = bytes(64)
     addr = AddressContent.pubkey(pk).address().encode_base58()
-    tx = build_tx(
+    tx = DecodedTransaction.build(
         [(txid, 0)],
         [(addr, 100)],
     )
-    txaux = sign_tx(tx, [(pk, sig)])
+    txaux = DecodedTxAux.build(tx, [(pk, sig)])
 
     node = LogicNode(Transport().endpoint(), Storage('./test_db'))
     peer = node._peers.get()[0]

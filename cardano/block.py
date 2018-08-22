@@ -10,9 +10,10 @@ We also try to cache raw data, to prevent re-serialization.
 import cbor
 import base64
 import binascii
+import itertools
 from collections import defaultdict
-from .utils import hash_serialized, hash_data
-from .address import Address, AddressContent, addr_hash
+from .utils import hash_serialized, hash_data, verify
+from .address import Address, AddressContent
 from .random import Random
 from . import config
 
@@ -81,6 +82,25 @@ class DecodedBlockHeader(DecodedBase):
 
 
 class DecodedTransaction(DecodedBase):
+    @classmethod
+    def build(cls, inputs, outputs, attrs=None):
+        '''
+        inputs: [(txid, ix)]
+        outputs: [(address, n)]
+        '''
+        data = (
+            cbor.VarList([  # inputs
+                (0, cbor.Tag(24, cbor.dumps((txid, ix))))
+                for txid, ix in inputs
+            ]),
+            cbor.VarList([  # outputs
+                (cbor.loads(Address.decode_base58(addr).encode()), c)
+                for addr, c in outputs
+            ]),
+            attrs or {}  # attrs
+        )
+        return cls(data)
+
     def tx(self):
         from .wallet import Tx
         return Tx(self.hash(), self.inputs(), self.outputs())
@@ -99,11 +119,42 @@ class DecodedTransaction(DecodedBase):
 
 class DecodedTxAux(DecodedBase):
     '(Tx, TxWitness)'
+    @classmethod
+    def build(cls, tx, witnesses):
+        '''
+        witnesses: [(pubkey, signature)]
+        '''
+        assert len(tx.inputs()) == len(witnesses)
+        return cls((
+            tx.data,
+            [(0, cbor.Tag(24, cbor.dumps((pk, sig))))
+             for pk, sig in witnesses]
+        ))
+
     def transaction(self):
         return DecodedTransaction(self.data[0])
 
-    def verify(self):
-        pass
+    def verify(self, undo):
+        '''
+        undo: [TxOut]
+        '''
+        for txin, wit, out in itertools.zip_longest(
+                self.transaction().inputs(),
+                self.data[1],
+                undo):
+            if wit[0] != 0:
+                print('only support pubkey witness')
+                return False
+            pk, sig = cbor.loads(wit[1].value)
+            if not out:
+                return False
+            addr = Address.decode(out.addr)
+            if not addr.verify_pubkey(pk):
+                return False
+            if not verify('tx', pk, sig, hash_data(self.data[0])):
+                print('sig verify fail')
+                return False
+        return True
 
 
 class DecodedBlock(DecodedBase):
@@ -117,6 +168,11 @@ class DecodedBlock(DecodedBase):
         assert not self.is_genesis()
         # GenericBlock -> MainBody -> [(Tx, TxWitness)]
         return [DecodedTransaction(tx) for tx, _ in self.data[1][1][0]]
+
+    def txaux(self):
+        assert not self.is_genesis()
+        # GenericBlock -> MainBody -> [(Tx, TxWitness)]
+        return [DecodedTxAux(data) for data in self.data[1][1][0]]
 
     def txs(self):
         'Transaction list in wallet format.'
@@ -145,61 +201,6 @@ class DecodedBlock(DecodedBase):
     def leaders(self):
         assert self.is_genesis()
         return self.data[1][1]
-
-
-class VerifyException(Exception):
-    pass
-
-
-def verify_header(
-        hdr,
-        protocol_magic,
-        header_no_unknown=False,
-        prev_header=None,
-        current_slot=None,
-        leaders=None,
-        max_header_size=None):
-    if hdr.protocol_magic() != config.PROTOCOL_MAGIC:
-        raise VerifyException('protocol magic')
-
-    if prev_header is not None:
-        if hdr.prev_header() != prev_header.hash():
-            raise VerifyException('prev header hash')
-        if hdr.difficulty() != prev_header.difficulty() + (0 if hdr.is_genesis() else 1):
-            raise VerifyException('prev header difficulty')
-        if hdr.slot() <= prev_header.slot():
-            raise VerifyException('prev header slot')
-        if not hdr.is_genesis() and hdr.slot()[0] != prev_header.slot()[0]:
-            raise VerifyException('prev header epoch')
-
-    if current_slot is not None and hdr.slot() > current_slot:
-        raise VerifyException('slot in future')
-
-    if leaders is not None and not hdr.is_genesis() and \
-            leaders[hdr.slot()[1]] != addr_hash(hdr.leader_key()):
-        raise VerifyException('leader')
-
-    if header_no_unknown and hdr.unknowns():
-        raise VerifyException('extra header data')
-
-
-def verify_block(
-        blk,
-        protocol_magic,
-        max_block_size=None,
-        body_no_unknown=False,
-        **kwargs):
-    verify_header(blk.header(), protocol_magic, **kwargs)
-
-    if max_block_size is not None and len(blk.raw()) > max_block_size:
-        raise VerifyException('block size')
-
-    if body_no_unknown and blk.unknowns():
-        raise VerifyException('extra block data')
-
-
-def verify_blocks(blks):
-    pass
 
 
 def genesis_block(prev_header, epoch, leaders):
@@ -317,35 +318,6 @@ def genesis_block0():
         ], leaders],
         {}
     ])
-
-
-def build_tx(inputs, outputs, attrs=None):
-    '''
-    inputs: [(txid, ix)]
-    outputs: [(address, n)]
-    '''
-    return DecodedTransaction((
-        cbor.VarList([  # inputs
-            (0, cbor.Tag(24, cbor.dumps((txid, ix))))
-            for txid, ix in inputs
-        ]),
-        cbor.VarList([  # outputs
-            (cbor.loads(Address.decode_base58(addr).encode()), c)
-            for addr, c in outputs
-        ]),
-        attrs or {}  # attrs
-    ))
-
-
-def sign_tx(tx, witnesses):
-    '''
-    witnesses: [pubkey, signature]
-    '''
-    return DecodedTxAux((
-        tx.data,
-        [(0, cbor.Tag(24, cbor.dumps((pk, sig))))
-         for pk, sig in witnesses]
-    ))
 
 
 if __name__ == '__main__':
