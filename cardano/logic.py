@@ -9,6 +9,7 @@ import traceback
 
 import gevent
 import cbor
+from orderedset import OrderedSet
 
 from .block import DecodedBlockHeader, DecodedBlock
 from .node import Node, Worker, Message
@@ -114,15 +115,6 @@ class Subscribe1(Worker):
         self.conv.send(cbor.dumps(42))
 
 
-workers = [
-    GetHeaders,
-    GetBlocks,
-    StreamBlocks,
-    Subscribe,
-    Subscribe1,
-]
-
-
 # Listeners
 def handle_get_headers(node, conv):
     'Peer wants some block headers from us.'
@@ -163,6 +155,51 @@ def handle_headers(node, conv):
         return
 
     node.retriever.add_retrieval_task(conv.addr, header)
+
+
+def inv_worker(conv, key, value):
+    '''
+    Inv/Req/Data/Res
+
+    send (Left (InvMsg key))                       listener (Either InvMsg DataMsg)
+    Either ReqMsg ResMsg <- recv
+    case
+        (ReqMsg (Just key)) ->
+           send (Right (DataMsg data))
+           Either ReqMsg ResMsg <- recv
+           case
+             ResMsg -> return ResMsg
+             ReqMsg -> error
+        (ReqMsg Nothing) -> pass
+        ResMsg -> error
+    '''
+    print('send inv key', key)
+    conv.send(cbor.dumps([0, key]))  # Left (InvMsg key)
+    (tag, req) = cbor.loads(conv.receive())
+    assert tag == 0, 'should be ReqMsg'
+    if req:
+        assert cbor.dumps(req[0]) == cbor.dumps(key)
+        conv.send(cbor.dumps([1, value]))  # Right (DataMsg value)
+        (tag, res) = cbor.loads(conv.receive())
+        assert tag == 1, 'should be ResMsg'
+        return res
+
+
+class TxInvWorker(Worker):
+    message_type = Message.TxInvData
+
+    def __call__(self, key, value):
+        return inv_worker(self.conv, key, value)
+
+
+workers = [
+    GetHeaders,
+    GetBlocks,
+    StreamBlocks,
+    Subscribe,
+    Subscribe1,
+    TxInvWorker,
+]
 
 
 listeners = {
@@ -250,7 +287,7 @@ class LogicNode(Node):
             start = time.time()
 
             if not self._peers.ready():
-                self._peers.set(set([addr]))
+                self._peers.set(OrderedSet([addr]))
             else:
                 self._peers.get().add(addr)
 
@@ -269,7 +306,26 @@ class LogicNode(Node):
 
 
 if __name__ == '__main__':
+    config.use('mainnet')
     from .transport import Transport
     from .storage import Storage
+    from .utils import hash_data
+    from .address import AddressContent
+    from .block import build_tx, sign_tx
+
+    txid = hash_data(b'')
+    pk = bytes(64)
+    sig = bytes(64)
+    addr = AddressContent.pubkey(pk).address().encode_base58()
+    tx = build_tx(
+        [(txid, 0)],
+        [(addr, 100)],
+    )
+    txaux = sign_tx(tx, [(pk, sig)])
+
     node = LogicNode(Transport().endpoint(), Storage('./test_db'))
-    gevent.wait()
+    peer = node._peers.get()[0]
+    worker = node.worker(Message.TxInvData, peer)
+    key, success = worker(tx.hash(), txaux.data)
+    assert key == tx.hash()
+    print('success', success)

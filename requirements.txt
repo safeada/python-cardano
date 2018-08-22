@@ -5,8 +5,9 @@ gevent==1.3.5
 mnemonic==0.18
 pbkdf2==1.3
 recordclass==0.5
--e git+https://github.com/yihuang/cbor_py.git@a3b3700022199ba36fd8b26730450a2f247c51b9#egg=cbor
+-e git+https://github.com/yihuang/cbor_py.git@e93277397ef8f9336e4f0c97fb30ecc872d31861#egg=cbor
 python-rocksdb==0.6.9
 dnspython==1.15.0
 PyYAML==3.13
 appdirs==1.4.3
+orderedset==2.0.1

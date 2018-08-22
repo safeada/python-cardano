@@ -24,6 +24,8 @@ class Message(enum.IntEnum):
     Subscribe = 14
     Stream = 15
     StreamBlock = 16
+    TxInvData = 37      # InvOrData (Tagged TxMsgContents TxId) TxMsgContents
+    TxReqRes = 94       # ReqOrRes (Tagged TxMsgContents TxId)
 
 
 MessageSndRcv = {
@@ -31,6 +33,8 @@ MessageSndRcv = {
     Message.Headers: Message.GetHeaders,
     Message.GetBlocks: Message.Block,
     Message.Stream: Message.StreamBlock,
+    Message.TxInvData: Message.TxReqRes,
+    Message.TxReqRes: Message.TxInvData,
     Message.Subscribe: Message.Void,
     Message.Subscribe1: Message.Void,
 }

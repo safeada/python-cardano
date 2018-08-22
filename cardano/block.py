@@ -83,7 +83,7 @@ class DecodedBlockHeader(DecodedBase):
 class DecodedTransaction(DecodedBase):
     def tx(self):
         from .wallet import Tx
-        return Tx(self.txid(), self.inputs(), self.outputs())
+        return Tx(self.hash(), self.inputs(), self.outputs())
 
     def inputs(self):
         from .wallet import TxIn
@@ -96,8 +96,14 @@ class DecodedTransaction(DecodedBase):
         return [TxOut(cbor.dumps(addr), c)
                 for addr, c in self.data[1]]
 
-    def txid(self):
-        return hash_data(self.data)
+
+class DecodedTxAux(DecodedBase):
+    '(Tx, TxWitness)'
+    def transaction(self):
+        return DecodedTransaction(self.data[0])
+
+    def verify(self):
+        pass
 
 
 class DecodedBlock(DecodedBase):
@@ -311,6 +317,35 @@ def genesis_block0():
         ], leaders],
         {}
     ])
+
+
+def build_tx(inputs, outputs, attrs=None):
+    '''
+    inputs: [(txid, ix)]
+    outputs: [(address, n)]
+    '''
+    return DecodedTransaction((
+        cbor.VarList([  # inputs
+            (0, cbor.Tag(24, cbor.dumps((txid, ix))))
+            for txid, ix in inputs
+        ]),
+        cbor.VarList([  # outputs
+            (cbor.loads(Address.decode_base58(addr).encode()), c)
+            for addr, c in outputs
+        ]),
+        attrs or {}  # attrs
+    ))
+
+
+def sign_tx(tx, witnesses):
+    '''
+    witnesses: [pubkey, signature]
+    '''
+    return DecodedTxAux((
+        tx.data,
+        [(0, cbor.Tag(24, cbor.dumps((pk, sig))))
+         for pk, sig in witnesses]
+    ))
 
 
 if __name__ == '__main__':
