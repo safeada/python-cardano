@@ -10,7 +10,7 @@ import rocksdb
 import mnemonic
 import gevent
 
-from cardano.transport import Transport
+from cardano.transport import Transport, normalize_endpoint_addr
 from cardano.storage import Storage, remove_prefix
 from cardano.logic import LogicNode
 from cardano.constants import FIRST_HARDEN_INDEX
@@ -35,7 +35,7 @@ def load_wallet_config(args):
 
 def handle_run(args):
     store = Storage(args.root)
-    transport = Transport()
+    transport = Transport(args.listen)
     node = LogicNode(transport.endpoint(), store)
     if args.backdoor:
         from gevent.backdoor import BackdoorServer
@@ -258,6 +258,19 @@ def cli_parser():
         default='./test_db',
         help='root directory for storage, default ./test_db'
     )
+    common.add_argument(
+        '--listen',
+        dest='listen',
+        default=None,
+        help='ip:port to listen, act as relay node'
+    )
+    common.add_argument(
+        '--connect',
+        dest='connect',
+        type=os.fsencode,
+        default=None,
+        help='connect to alternate relay server'
+    )
 
     wallet = argparse.ArgumentParser(add_help=False)
     wallet.add_argument(
@@ -408,6 +421,8 @@ if __name__ == '__main__':
     args = p.parse_args()
     if 'handler' in args:
         config.use(args.chain)
+        if args.connect:
+            config.CLUSTER_ADDR = normalize_endpoint_addr(args.connect)
         args.handler(args)
     else:
         p.print_help()

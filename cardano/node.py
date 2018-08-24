@@ -73,8 +73,8 @@ class Conversation(object):
     def send(self, data):
         self._conn.send(data)
 
-    def receive(self, *args):
-        o = self._queue.get(*args)
+    def receive(self, *args, **kwargs):
+        o = self._queue.get(*args, **kwargs)
         if o == StopIteration:
             # closed by remote
             if self._conn.alive:

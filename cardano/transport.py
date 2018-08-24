@@ -507,6 +507,9 @@ class Transport(object):
         addr: (host, port).
               None means unaddressable.
         '''
+        if isinstance(addr, str):
+            ip, port = addr.rsplit(':', 1)
+            addr = (ip, int(port))
         self._bind_addr = addr
         self._addr = None
 
@@ -516,9 +519,9 @@ class Transport(object):
         if addr:
             # Start listening server.
             self._server = gevent.server.StreamServer(addr, self.handle_connection)
-            # Use read binded port.
-            self._addr = (addr[0], self._server.address[1])
             self._server.start()
+            # Use read binded port.
+            #self._addr = (addr[0], self._server.address[1])
 
     def close(self):
         # TODO close all the endpoints and connections.

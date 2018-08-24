@@ -14,6 +14,7 @@ from orderedset import OrderedSet
 from .block import DecodedBlockHeader, DecodedBlock
 from .node import Node, Worker, Message
 from .utils import get_current_slot, flatten_slotid
+from .storage import fetch_raw_blocks, stream_raw_blocks
 from . import config
 
 
@@ -25,11 +26,13 @@ class GetHeaders(Worker):
         self.conv.send(cbor.dumps([cbor.VarList(from_), [to] if to else []]))
         tag, data = cbor.loads(self.conv.receive())  # sum type MsgHeaders
         if tag == 1:  # NoHeaders
+            print('no headers', data)
             return []
         return [DecodedBlockHeader(item) for item in data]
 
     def tip(self):
-        return self([], None)[0]
+        data = self([], None)
+        return data[0] if data else None
 
 
 class GetBlocks(Worker):
@@ -118,25 +121,70 @@ class Subscribe1(Worker):
 # Listeners
 def handle_get_headers(node, conv):
     'Peer wants some block headers from us.'
+    store = node.store
+    limit = config.CHAIN['block']['recoveryHeadersMessage']
     while True:
-        data = conv.receive()
-        if not data:
-            print('remote closed')
-            break
-        print('request', cbor.loads(data))
-        conv.send(cbor.dumps([0, []]))  # NoHeaders
+        checkpoints, tip = cbor.loads(conv.receive())
+        tip = tip[0] if tip else None
+
+        if node.retriever.recovering():
+            conv.send(cbor.dumps((1, b'server node is in recovery mode')))
+            continue
+
+        headers = None
+        if not checkpoints:
+            # return single header
+            headers = [store.blockheader(tip) if tip else store.tip()]
+        else:
+            # TODO filter in mainchain.
+            # get most recent checkpoint
+            checkpoint = max(checkpoints, key=lambda k: store.blockheader(k).slot())
+            count = 0
+            headers = []
+            for h in store.iter_header_hash(checkpoint):
+                count += 1
+                if count > limit:
+                    break
+                headers.append(store.blockheader(h))
+
+        if headers:
+            conv.send(cbor.dumps((0, cbor.VarList(hdr.data for hdr in headers))))
+        else:
+            conv.send(cbor.dumps((1, b'loaded empty headers')))
 
 
 def handle_get_blocks(node, conv):
     'Peer wants some blocks from us.'
-    data = cbor.loads(conv.receive())
-    print('request', data)
-    conv.send(cbor.dumps([1, 0]))  # NoBlock
+    hstart, hstop = cbor.loads(conv.receive())
+    for rawblk in fetch_raw_blocks(node.store, hstart, hstop):
+        if not rawblk:
+            conv.send(cbor.dumps([1, 0]))  # NoBlock
+            break
+        conv.send(b"\x82\x00" + rawblk)
 
 
 def handle_stream_start(node, conv):
     'Peer wants to stream some blocks from us.'
-    pass
+    store = node.store
+    tag, v = cbor.loads(conv.receive())
+    assert tag == 0  # MsgStart
+    checkpoints, tip, window = v
+    assert window > 0
+    # TODO filter in mainchain
+    checkpoint = max(checkpoints, key=lambda k: store.blockheader(k).slot())
+    for rawblk in stream_raw_blocks(store, checkpoint):
+        if not rawblk:
+            break
+        conv.send(b"\x82\x00" + rawblk)
+        window -= 1
+        if window <= 0:
+            # expect MsgUpdate
+            tag, v = cbor.loads(conv.receive())
+            assert tag == 1  # MsgUpdate
+            window = v[0]
+            assert window > 0
+
+    conv.send((2, 0))  # MsgStreamEnd
 
 
 def handle_headers(node, conv):
@@ -155,6 +203,29 @@ def handle_headers(node, conv):
         return
 
     node.retriever.add_retrieval_task(conv.addr, header)
+
+    # broadcast out.
+    node.broadcast(Message.Headers, data)
+
+
+def handle_subscribe(node, conv):
+    tag = cbor.loads(conv.receive())
+    assert tag == 42  # MsgSubscribe
+
+    # add peer
+    if conv.addr in node.subscribers:
+        print('subscriber already exists')
+        return
+
+    print('add subscriber', conv.addr)
+    node.subscribers.add(conv.addr)
+    try:
+        while True:
+            tag = cbor.loads(conv.receive(timeout=config.SLOT_DURATION * 2 / 1000))
+            assert tag == 43  # MsgKeepalive
+    finally:
+        print('remove subscriber', conv.addr)
+        node.subscribers.remove(conv.addr)
 
 
 def inv_worker(conv, key, value):
@@ -207,12 +278,13 @@ listeners = {
     Message.GetBlocks: handle_get_blocks,
     Message.Stream: handle_stream_start,
     Message.Headers: handle_headers,
+    Message.Subscribe: handle_subscribe,
 }
 
 
 def retry_duration(duration):
     slot = config.SLOT_DURATION / 1000
-    return math.floor(slot / 2 ** (duration / slot))
+    return math.floor(slot / (2 ** (duration / slot)))
 
 
 class LogicNode(Node):
@@ -241,6 +313,18 @@ class LogicNode(Node):
         self.subscribe_thread = gevent.spawn(self._subscribe, [config.CLUSTER_ADDR])
         self.subscribe_thread.link(self._handle_worker_exit)
 
+        self.subscribers = set()  # set of addresses of subscribers
+
+    def broadcast(self, code, msg):
+        for addr in self.subscribers:
+            try:
+                conv = self.connect(addr)
+                conv.send(cbor.dumps(code) + msg)
+            except Exception as e:
+                traceback.print_exc()
+                print('broadcast failed:' + str(e))
+                self.subscribers.remove(addr)
+
     def _handle_worker_exit(self, t):
         print('worker thread exit unexpected')
         gevent.kill(self._parent_thread)
@@ -255,7 +339,8 @@ class LogicNode(Node):
                 traceback.print_exc()
                 print('get tip failed', str(e))
             else:
-                self.retriever.add_retrieval_task(addr, header)
+                if header:
+                    self.retriever.add_retrieval_task(addr, header)
 
     def _trigger_recovery_worker(self, lag_behind):
         while True:

@@ -4,7 +4,7 @@ import gevent.event
 from .node import Message
 from .utils import get_current_slot
 from .constants import STREAM_WINDOW
-from .block import verify_header
+from .integrity import verify_header
 from . import config
 
 

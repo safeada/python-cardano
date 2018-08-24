@@ -87,11 +87,16 @@ class Storage(object):
         if buf:
             return DecodedBlockHeader.from_raw(buf, h)
 
-    def block(self, hdr):
+    def raw_block(self, hdr):
         db = self.open_epoch_db(hdr.slot()[0], readonly=True)
         buf = db.get(b'b/' + hdr.hash())
         if buf:
-            return DecodedBlock(cbor.loads(buf), buf)
+            return buf
+
+    def block(self, hdr):
+        raw = self.raw_block(hdr)
+        if raw:
+            return DecodedBlock.from_raw(raw)
 
     def undos(self, hdr):
         db = self.open_epoch_db(hdr.slot()[0], readonly=True)
@@ -159,9 +164,9 @@ class Storage(object):
 
             yield DecodedBlock(cbor.loads(raw), raw)
 
-    def blockheaders_rev(self):
+    def blockheaders_rev(self, start=None):
         'Iterate block header backwardly.'
-        current_hash = self.tip().hash()
+        current_hash = start or self.tip().hash()
         while True:
             raw = self.db.get(b'b/' + current_hash)
             if not raw:
@@ -170,11 +175,19 @@ class Storage(object):
             yield hdr
             current_hash = hdr.prev_header()
 
-    def blockheaders(self):
-        current_hash = config.GENESIS_BLOCK_HASH
+    def blockheaders(self, start=None):
+        current_hash = start or config.GENESIS_BLOCK_HASH
         while True:
             raw = self.db.get(b'b/' + current_hash)
             yield DecodedBlockHeader.from_raw(raw, current_hash)
+            current_hash = self.db.get(b'e/fl/' + current_hash)
+            if not current_hash:
+                break
+
+    def iter_header_hash(self, start=None):
+        current_hash = start or config.GENESIS_BLOCK_HASH
+        while True:
+            yield current_hash
             current_hash = self.db.get(b'e/fl/' + current_hash)
             if not current_hash:
                 break
@@ -249,3 +262,33 @@ class Storage(object):
         data = self.db.get(b'ut/t/' + cbor.dumps(txin))
         if data:
             return cbor.loads(data)
+
+
+def hash_range(store, hstart, hstop, depth_limit):
+    if hstart == hstop:
+        assert depth_limit > 0
+        yield hstart
+        return
+    start = store.blockheader(hstart)
+    stop = store.blockheader(hstop)
+    assert start and stop
+    assert stop.diffculty() > start.diffculty()
+    assert stop.diffculty() - start.diffculty() < depth_limit
+    for h in store.iter_header_hash(start):
+        yield h
+        if h == stop:
+            break
+
+
+def fetch_raw_blocks(store, hstart, hstop):
+    '''
+    '''
+    for h in hash_range(store,
+                        hstart,
+                        hstop,
+                        config.CHAIN['block']['recoveryHeadersMessage']):
+        yield store.raw_block(store.blockheader(h))
+
+def stream_raw_blocks(store, hstart):
+    for h in store.iter_header_hash(hstart):
+        yield store.raw_block(store.blockheader(h))
