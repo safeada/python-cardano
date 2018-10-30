@@ -1,10 +1,10 @@
-from typing import NamedTuple, Union, List, Dict
+from typing import Hashable, NamedTuple, Union, List, Dict
 from dataclasses import dataclass, field
 from collections import defaultdict
 
 
-Address = bytes
-TxId = bytes
+Address = Hashable
+TxId = Hashable
 
 UTxOInput = NamedTuple('UTxOInput', [('txid', TxId), ('index', int)])
 RedeemInput = NamedTuple('RedeemInput', [('addr', Address), ('value', int)])
