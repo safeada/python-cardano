@@ -20,7 +20,7 @@ ext_modules = [Extension("cardano.cbits", sources=[
 cmdclass = {'build_ext': build_ext}
 
 setup(
-    name='cardano-utils',
+    name='python-cardano',
     version='1.0.0',
     packages=['cardano'],
     ext_modules=ext_modules,
