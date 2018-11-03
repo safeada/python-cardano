@@ -2,3 +2,4 @@ include LICENSE
 include README.rst
 include conf/configuration.yaml
 include conf/*.json
+graft cbits

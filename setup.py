@@ -21,7 +21,7 @@ cmdclass = {'build_ext': build_ext}
 
 setup(
     name='python-cardano',
-    version='1.0.0',
+    version='1.0.1',
     license='MIT',
     platforms=['OS Independent'],
     packages=['cardano'],
