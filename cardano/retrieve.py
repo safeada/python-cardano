@@ -1,3 +1,4 @@
+import binascii
 import gevent.queue
 import gevent.event
 

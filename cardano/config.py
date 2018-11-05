@@ -6,7 +6,7 @@ import cbor
 import yaml
 
 
-CONF_DIR = os.path.join(os.path.dirname(__file__), '../conf')
+CONF_DIR = os.path.join(os.path.dirname(__file__), 'conf')
 
 
 def load_conf():
@@ -47,8 +47,8 @@ def use(key):
     g = globals()
     g['CLUSTER_ADDR'] = {
         'mainnet': b'relays.cardano-mainnet.iohk.io:3000:0',
-        'mainnet-staging': b'relays.awstest.iohkdev.io',
-        'testnet': b'relays.cardano-testnet.iohkdev.io',
+        'mainnet-staging': b'relays.awstest.iohkdev.io:3000:0',
+        'testnet': b'relays.cardano-testnet.iohkdev.io:3000:0',
     }[key]
     confkey = {
         'mainnet': 'mainnet_full',
@@ -57,7 +57,11 @@ def use(key):
     }[key]
     genesis_block_hash = {
         'mainnet': binascii.unhexlify(
-            '89d9b5a5b8ddc8d7e5a6795e9774d97faf1efea59b2caf7eaf9f8c5b32059df4')
+            '89d9b5a5b8ddc8d7e5a6795e9774d97faf1efea59b2caf7eaf9f8c5b32059df4'),
+        'mainnet-staging': binascii.unhexlify(
+            'B365F1BE6863B453F12B93E1810909B10C79A95EE44BF53414888513FE172C90'),
+        'testnet': binascii.unhexlify(
+            '81a965de1412623ccd1cb3664f4d61a6cb4b9d53b44d779ed918e87bf3493f02'),
     }[key]
     cfg = g_config[confkey]
     g['CHAIN'] = cfg

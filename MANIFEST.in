@@ -1,5 +1,5 @@
 include LICENSE
 include README.rst
-include conf/configuration.yaml
-include conf/*.json
+include cardano/conf/configuration.yaml
+include cardano/conf/*.json
 graft cbits

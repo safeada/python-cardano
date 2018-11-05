@@ -47,6 +47,7 @@ def remove_prefix(db, prefix):
 
 class Storage(object):
     def __init__(self, root_path, readonly=False):
+        print('create storage at', root_path)
         if not os.path.exists(root_path):
             os.makedirs(root_path)
         self._root_path = root_path
@@ -71,11 +72,14 @@ class Storage(object):
             )
         return self._current_epoch_db
 
+    def load_tip(self):
+        h = self.db.get(b'c/tip')
+        if h:
+            return self.blockheader(h)
+
     def tip(self):
         if not self._tip:
-            h = self.db.get(b'c/tip')
-            if h:
-                self._tip = self.blockheader(h)
+            self._tip = self.load_tip()
         return self._tip
 
     def set_tip(self, hdr, batch=None):
