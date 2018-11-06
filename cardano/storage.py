@@ -236,6 +236,7 @@ class Storage(object):
             batch.put(b'u/' + h, cbor.dumps(undos))
         batch.put(b'b/' + h, block.raw())
         db.write(batch)
+        return undos
 
     def _get_block_undos(self, block):
         return [[self.get_output(txin) for txin in tx.inputs()]
@@ -263,9 +264,10 @@ class Storage(object):
             yield k[2:]
 
     def get_output(self, txin):
+        from .wallet import TxOut
         data = self.db.get(b'ut/t/' + cbor.dumps(txin))
         if data:
-            return cbor.loads(data)
+            return TxOut(*cbor.loads(data))
 
 
 def hash_range(store, hstart, hstop, depth_limit):
