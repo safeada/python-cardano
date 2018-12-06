@@ -61,7 +61,7 @@ def use(key):
         'mainnet-staging': binascii.unhexlify(
             'B365F1BE6863B453F12B93E1810909B10C79A95EE44BF53414888513FE172C90'),
         'testnet': binascii.unhexlify(
-            '81a965de1412623ccd1cb3664f4d61a6cb4b9d53b44d779ed918e87bf3493f02'),
+            '7f141ea26e189c9cb09e2473f6499561011d5d3c90dd642fde859ce02282a3ae'),
     }[key]
     cfg = g_config[confkey]
     g['CHAIN'] = cfg
