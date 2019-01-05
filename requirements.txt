@@ -8,6 +8,6 @@ recordclass==0.5
 -e git+https://github.com/yihuang/cbor_py.git@e93277397ef8f9336e4f0c97fb30ecc872d31861#egg=cbor
 python-rocksdb==0.6.9
 dnspython==1.15.0
-PyYAML==3.13
+PyYAML==4.2b1
 appdirs==1.4.3
 orderedset==2.0.1

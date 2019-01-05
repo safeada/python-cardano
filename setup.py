@@ -42,7 +42,7 @@ setup(
         'recordclass>=0.5',
         'python-rocksdb>=0.6.9',
         'dnspython>=1.15.0',
-        'PyYAML>=3.13',
+        'PyYAML>=4.2b1',
         'appdirs>=1.4.3',
         'orderedset>=2.0.1',
     ),
