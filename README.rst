@@ -1,5 +1,5 @@
-Python-Cardano
-==============
+DEPRECATED
+===========
 
 Python implementation of Cardano project, including network protocol, crypto primitives, wallet logic, and more.
 
