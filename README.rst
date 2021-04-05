@@ -1,6 +1,8 @@
 DEPRECATED
 ===========
 
+This is no longer supported, only works for the anchient byron era, mostly irrelevant now.
+
 Python implementation of Cardano project, including network protocol, crypto primitives, wallet logic, and more.
 
 Why This Project
