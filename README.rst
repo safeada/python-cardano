@@ -1,11 +1,11 @@
-DEPRECATED
-===========
+[DEPRECATED] Byron Era
+======================
 
 .. image:: http://unmaintained.tech/badge.svg
   :target: http://unmaintained.tech
   :alt: No Maintenance Intended
 
-This is no longer supported, only works for the anchient byron era, mostly irrelevant now.
+This is no longer supported, only works for the byron era, mostly irrelevant now.
 
 Python implementation of Cardano project, including network protocol, crypto primitives, wallet logic, and more.
 
