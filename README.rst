@@ -1,11 +1,7 @@
-[DEPRECATED] Byron Era
-======================
+[WIP] Shelley Era
+=================
 
-.. image:: http://unmaintained.tech/badge.svg
-  :target: http://unmaintained.tech
-  :alt: No Maintenance Intended
-
-This is no longer supported, only works for the byron era, mostly irrelevant now.
+The old version is archived in byron branch, current development is for shelley era.
 
 Python implementation of Cardano project, including network protocol, crypto primitives, wallet logic, and more.
 
